@@ -2,10 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
-	"models"
 	"net/http"
 	"time"
-	"zvk-requests/utils"
+
+	"github.com/eeephemera/zvk-requests/server/models"
+	"github.com/eeephemera/zvk-requests/server/utils"
 
 	"github.com/golang-jwt/jwt/v5"
 )

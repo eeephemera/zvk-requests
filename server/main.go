@@ -3,8 +3,9 @@ package main
 import (
 	"net/http"
 
-	"github.com/eeephemera/zvk-requests/handlers"
-	"github.com/eeephemera/zvk-requests/middleware"
+	"github.com/eeephemera/zvk-requests/server/handlers"
+
+	"github.com/eeephemera/zvk-requests/server/middleware"
 )
 
 func main() {

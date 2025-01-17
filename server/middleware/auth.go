@@ -7,7 +7,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var secretKey = []byte("your_secret_key") // Замените на более безопасный ключ
+var secretKey = []byte("qwerty123") // Замените на более безопасный ключ
 
 // ValidateToken is a middleware that checks if the JWT is valid.
 func ValidateToken(next http.Handler) http.Handler {
