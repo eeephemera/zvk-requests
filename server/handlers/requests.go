@@ -1,35 +1,78 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
-	"time"
+	"strconv"
 
 	"github.com/eeephemera/zvk-requests/db"
 	"github.com/eeephemera/zvk-requests/models"
+	"github.com/gorilla/mux"
 )
 
-// CreateRequest создаёт новый запрос в базе данных.
-func CreateRequest(w http.ResponseWriter, r *http.Request) {
-	var request models.Request
+type RequestHandler struct {
+	Repo *db.RequestRepository
+}
 
-	// Прочитать данные из тела запроса
-	err := json.NewDecoder(r.Body).Decode(&request)
-	if err != nil {
-		http.Error(w, "Unable to parse request", http.StatusBadRequest)
+// Создание запроса
+func (h *RequestHandler) CreateRequestHandler(w http.ResponseWriter, r *http.Request) {
+	var req models.Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Вставить новый запрос в базу данных
-	query := "INSERT INTO requests (customer, product, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5) RETURNING id"
-	err = db.GetDBConnection().QueryRow(context.Background(), query, request.Customer, request.Product, request.Status, time.Now(), time.Now()).Scan(&request.ID)
-	if err != nil {
-		http.Error(w, "Unable to create request", http.StatusInternalServerError)
+	if err := h.Repo.CreateRequest(r.Context(), &req); err != nil {
+		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
 	}
 
-	// Ответ клиенту с созданным запросом
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(request)
+	json.NewEncoder(w).Encode(req)
+}
+
+// Получение запросов пользователя
+func (h *RequestHandler) GetRequestsByUserHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value("userID").(int)
+
+	requests, err := h.Repo.GetRequestsByUser(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "Failed to fetch requests", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(requests)
+}
+
+// Обновление запроса
+func (h *RequestHandler) UpdateRequestHandler(w http.ResponseWriter, r *http.Request) {
+	var req models.Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	req.UserID = r.Context().Value("userID").(int)
+
+	if err := h.Repo.UpdateRequest(r.Context(), &req); err != nil {
+		http.Error(w, "Failed to update request", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Request updated"))
+}
+
+// Удаление запроса
+func (h *RequestHandler) DeleteRequestHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value("userID").(int)
+	requestID, _ := strconv.Atoi(mux.Vars(r)["id"])
+
+	if err := h.Repo.DeleteRequest(r.Context(), requestID, userID); err != nil {
+		http.Error(w, "Failed to delete request", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Request deleted"))
 }

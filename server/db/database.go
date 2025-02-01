@@ -2,34 +2,33 @@ package db
 
 import (
 	"context"
-	"fmt"
 	"log"
 
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var conn *pgx.Conn
+var pool *pgxpool.Pool
 
-// ConnectDB устанавливает соединение с базой данных PostgreSQL.
-func ConnectDB() {
+// ConnectDB инициализирует соединение с базой данных.
+func ConnectDB(ctx context.Context) {
+	// Жестко заданная строка подключения
+	dbURL := "postgres://postgres:1@localhost:5433/zvk_requests" // Замените на актуальные данные
 	var err error
-	conn, err = pgx.Connect(context.Background(), "postgres://postgres:1@localhost:5432/zvk_requests")
+
+	pool, err = pgxpool.New(ctx, dbURL)
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
 	}
-	fmt.Println("Successfully connected to the database.")
 }
 
-// GetDBConnection возвращает текущее соединение с базой данных.
-func GetDBConnection() *pgx.Conn {
-	return conn
+// GetDBConnection возвращает пул соединений.
+func GetDBConnection() *pgxpool.Pool {
+	return pool
 }
 
-// CloseDBConnection закрывает соединение с базой данных.
+// CloseDBConnection закрывает пул соединений.
 func CloseDBConnection() {
-	err := conn.Close(context.Background())
-	if err != nil {
-		log.Fatalf("Unable to close database connection: %v\n", err)
+	if pool != nil {
+		pool.Close()
 	}
-	fmt.Println("Database connection closed.")
 }

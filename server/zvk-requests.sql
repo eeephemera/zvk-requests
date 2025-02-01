@@ -1,12 +1,11 @@
 CREATE TABLE requests (
-  id SERIAL PRIMARY KEY,
-  customer_name TEXT NOT NULL,
-  inn CHAR(10) NOT NULL,
-  request_type TEXT,
-  distributor TEXT,
-  manager TEXT,
-  status TEXT DEFAULT 'Новый',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    status VARCHAR(50) DEFAULT 'На рассмотрении',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE users (
@@ -16,5 +15,3 @@ CREATE TABLE users (
     role TEXT NOT NULL CHECK (role IN ('Менеджер', 'Пользователь')),  -- Ограничиваем возможные значения
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
-
