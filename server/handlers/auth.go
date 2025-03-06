@@ -46,7 +46,12 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req RegisterRequest
+	// Обратите внимание: поле Role теперь не обязательно.
+	// Можно убрать Role из структуры RegisterRequest, либо просто игнорировать его здесь.
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -55,11 +60,6 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	// Валидация Email
 	if !utils.IsValidEmail(req.Email) {
 		http.Error(w, "Invalid email format", http.StatusBadRequest)
-		return
-	}
-	// Валидация Role
-	if req.Role != string(models.RoleManager) && req.Role != string(models.RoleUser) {
-		http.Error(w, "Invalid role", http.StatusBadRequest)
 		return
 	}
 	// Валидация пароля
@@ -75,6 +75,9 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Registration failed", http.StatusInternalServerError)
 		return
 	}
+
+	// Устанавливаем роль пользователя принудительно
+	role := string(models.RoleUser)
 
 	// Сохранение в БД
 	conn, err := db.GetDBConnection(r.Context())
@@ -96,7 +99,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		query,
 		req.Email,
 		hashedPassword,
-		req.Role,
+		role, // Всегда "Пользователь"
 		time.Now(),
 	).Scan(&user.ID, &user.Email, &user.Role, &user.CreatedAt)
 

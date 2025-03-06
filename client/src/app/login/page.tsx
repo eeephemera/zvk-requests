@@ -3,6 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+const getFriendlyErrorMessage = (error: string): string => {
+  if (error.includes("Invalid credentials")) return "Неверный логин или пароль";
+  if (error.includes("Invalid email format")) return "Неверный формат email";
+  if (error.includes("Invalid request body")) return "Неверно сформирован запрос";
+  return "Что-то пошло не так. Пожалуйста, попробуйте ещё раз.";
+};
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -12,7 +19,7 @@ export default function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    
+
     try {
       const res = await fetch(process.env.NEXT_PUBLIC_API_URL + "/api/login", {
         method: "POST",
@@ -22,59 +29,79 @@ export default function LoginPage() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.message || "Ошибка входа");
+        const responseText = await res.text();
+        let message = responseText || "Ошибка входа";
+        try {
+          const data = JSON.parse(responseText);
+          message = data.error || data.message || "Ошибка входа";
+        } catch {
+          // Если не получилось распарсить JSON, оставляем текст
+        }
+        throw new Error(message);
       }
 
       const data = await res.json();
       console.log("Успешный вход:", data);
 
-      // Проверка и перенаправление по роли
       if (data.role === "Менеджер") {
-        router.push("/manager"); // Соответствует app/manager/page.tsx
+        router.push("/manager");
       } else if (data.role) {
-        router.push("/requests"); // Соответствует app/requests/page.tsx
+        router.push("/requests");
       } else {
         throw new Error("Роль пользователя не определена");
       }
-
-    } catch (err: any) {
-      setError(err.message || "Ошибка при входе в систему");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(getFriendlyErrorMessage(err.message));
+      } else {
+        setError("Неизвестная ошибка");
+      }
       console.error("Ошибка входа:", err);
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-8">
-      <h1 className="text-2xl font-bold mb-4">Вход в систему</h1>
-      <form onSubmit={handleLogin} className="flex flex-col gap-4 w-full max-w-sm">
-        {error && <p className="text-red-500">{error}</p>}
-        
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="border p-2 rounded"
-          required
-        />
-        
-        <input
-          type="password"
-          placeholder="Пароль"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="border p-2 rounded"
-          required
-        />
-        
-        <button
-          type="submit"
-          className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600 transition-colors"
-        >
-          Войти
-        </button>
-      </form>
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center px-4">
+      <div className="max-w-md w-full bg-gray-800 p-8 rounded-lg shadow-lg">
+        <h1 className="text-3xl font-bold text-white mb-6 text-center">Вход в систему</h1>
+        <form onSubmit={handleLogin} className="space-y-4">
+          {error && <p className="text-red-400 text-center">{error}</p>}
+          <div>
+            <label htmlFor="email" className="block text-gray-300 mb-1">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              placeholder="Введите email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+          <div>
+            <label htmlFor="password" className="block text-gray-300 mb-1">
+              Пароль
+            </label>
+            <input
+              id="password"
+              type="password"
+              placeholder="Введите пароль"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            className="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded text-white font-semibold transition-colors"
+          >
+            Войти
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

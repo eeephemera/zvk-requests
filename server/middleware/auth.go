@@ -79,3 +79,26 @@ func ValidateToken(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+// RequireRole возвращает middleware, которое разрешает доступ только указанным ролям.
+func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Извлекаем роль пользователя из контекста
+			role, ok := r.Context().Value(RoleKey).(string)
+			if !ok {
+				http.Error(w, "User role not found", http.StatusForbidden)
+				return
+			}
+			// Проверяем, входит ли роль пользователя в список разрешённых
+			for _, allowed := range allowedRoles {
+				if role == allowed {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			// Если роль не подходит – возвращаем ошибку доступа
+			http.Error(w, "Forbidden", http.StatusForbidden)
+		})
+	}
+}

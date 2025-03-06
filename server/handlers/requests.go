@@ -24,7 +24,18 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-// CreateRequestHandler — обработчик для создания новой заявки
+// respondWithError — вспомогательная функция для отправки JSON-ошибок
+func respondWithError(w http.ResponseWriter, code int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(ErrorResponse{Error: message})
+}
+
+// ==========================
+// Обработчики для пользователей
+// ==========================
+
+// CreateRequestHandler — обработчик для создания новой заявки (для пользователя)
 func (h *RequestHandler) CreateRequestHandler(w http.ResponseWriter, r *http.Request) {
 	var req models.Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -32,13 +43,13 @@ func (h *RequestHandler) CreateRequestHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Проверка обязательных полей. Если "product_name" не требуется, уберите это условие.
+	// Проверка обязательных полей (например, Description)
 	if req.Description == "" {
 		respondWithError(w, http.StatusBadRequest, "Description is required")
 		return
 	}
 
-	// Извлекаем userID из контекста, который проставляет middleware.ValidateToken
+	// Извлекаем userID из контекста (проставляется middleware.ValidateToken)
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {
 		respondWithError(w, http.StatusUnauthorized, "User not authenticated")
@@ -46,16 +57,15 @@ func (h *RequestHandler) CreateRequestHandler(w http.ResponseWriter, r *http.Req
 	}
 	req.UserID = userID
 
-	// При желании установить статус по умолчанию
+	// Устанавливаем статус по умолчанию, если не задан
 	if req.Status == "" {
 		req.Status = "На рассмотрении"
 	}
 
-	// Вызов метода репозитория для создания заявки в БД
+	// Создаем заявку в БД через репозиторий
 	if err := h.Repo.CreateRequest(r.Context(), &req); err != nil {
 		log.Printf("Create request error: %v", err)
 		if strings.Contains(err.Error(), "unique constraint") {
-			// Если у вас есть уникальный индекс на какие-то поля, можно вернуть 409 Conflict
 			respondWithError(w, http.StatusConflict, "Request already exists")
 			return
 		}
@@ -68,7 +78,7 @@ func (h *RequestHandler) CreateRequestHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(req)
 }
 
-// GetRequestsByUserHandler — обработчик для получения списка заявок пользователя
+// GetRequestsByUserHandler — обработчик для получения списка заявок текущего пользователя
 func (h *RequestHandler) GetRequestsByUserHandler(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {
@@ -83,7 +93,6 @@ func (h *RequestHandler) GetRequestsByUserHandler(w http.ResponseWriter, r *http
 		limit = 10
 	}
 
-	// Получаем заявки из репозитория
 	requests, err := h.Repo.GetRequestsByUser(r.Context(), userID, limit, offset)
 	if err != nil {
 		log.Printf("Get requests error: %v", err)
@@ -91,13 +100,12 @@ func (h *RequestHandler) GetRequestsByUserHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Всегда возвращаем JSON, даже если заявок нет
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)        // Всегда 200 OK
-	json.NewEncoder(w).Encode(requests) // Вернётся [] если requests пустой
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(requests)
 }
 
-// UpdateRequestHandler — обработчик для обновления заявки
+// UpdateRequestHandler — обработчик для обновления заявки пользователем
 func (h *RequestHandler) UpdateRequestHandler(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {
@@ -123,11 +131,10 @@ func (h *RequestHandler) UpdateRequestHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Сохраняем неизменяемые поля, если нужно
-	req.UserID = existingReq.UserID       // или userID, если то же самое
-	req.CreatedAt = existingReq.CreatedAt // чтобы не сбрасывать дату создания
+	// Сохраняем неизменяемые поля
+	req.UserID = existingReq.UserID
+	req.CreatedAt = existingReq.CreatedAt
 
-	// Обновляем данные заявки в БД
 	if err := h.Repo.UpdateRequest(r.Context(), &req); err != nil {
 		log.Printf("Update request error: %v", err)
 		respondWithError(w, http.StatusInternalServerError, "Failed to update request")
@@ -139,7 +146,7 @@ func (h *RequestHandler) UpdateRequestHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(req)
 }
 
-// DeleteRequestHandler — обработчик для удаления заявки
+// DeleteRequestHandler — обработчик для удаления заявки пользователем
 func (h *RequestHandler) DeleteRequestHandler(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {
@@ -154,7 +161,6 @@ func (h *RequestHandler) DeleteRequestHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Удаляем заявку в репозитории
 	if err := h.Repo.DeleteRequest(r.Context(), requestID, userID); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			respondWithError(w, http.StatusNotFound, "Request not found")
@@ -168,9 +174,84 @@ func (h *RequestHandler) DeleteRequestHandler(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// respondWithError — вспомогательная функция для отправки JSON-ошибок
-func respondWithError(w http.ResponseWriter, code int, message string) {
+// ==========================
+// Обработчики для менеджеров
+// ==========================
+
+// GetAllRequestsHandler — обработчик для получения всех заявок (для менеджера)
+func (h *RequestHandler) GetAllRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 || limit > 100 {
+		limit = 10
+	}
+
+	requests, err := h.Repo.GetAllRequests(r.Context(), limit, offset)
+	if err != nil {
+		log.Printf("Get all requests error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to fetch all requests")
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(ErrorResponse{Error: message})
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(requests)
+}
+
+// UpdateRequestByManagerHandler — обработчик для обновления заявки менеджером (без проверки владельца)
+func (h *RequestHandler) UpdateRequestByManagerHandler(w http.ResponseWriter, r *http.Request) {
+	var req models.Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Получаем заявку без фильтра по userID
+	existingReq, err := h.Repo.GetRequestByIDWithoutUser(r.Context(), req.ID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			respondWithError(w, http.StatusNotFound, "Request not found")
+			return
+		}
+		log.Printf("Manager update request error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to update request")
+		return
+	}
+
+	// Сохраняем неизменяемые поля
+	req.UserID = existingReq.UserID
+	req.CreatedAt = existingReq.CreatedAt
+
+	// Используем метод UpdateRequestWithoutUser для обновления заявки менеджером
+	if err := h.Repo.UpdateRequestWithoutUser(r.Context(), &req); err != nil {
+		log.Printf("Manager update request error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to update request")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(req)
+}
+
+// DeleteRequestByManagerHandler — обработчик для удаления заявки менеджером (без проверки владельца)
+func (h *RequestHandler) DeleteRequestByManagerHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	requestID, err := strconv.Atoi(vars["id"])
+	if err != nil || requestID <= 0 {
+		respondWithError(w, http.StatusBadRequest, "Invalid request ID")
+		return
+	}
+
+	if err := h.Repo.DeleteRequestWithoutUser(r.Context(), requestID); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			respondWithError(w, http.StatusNotFound, "Request not found")
+			return
+		}
+		log.Printf("Manager delete request error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete request")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

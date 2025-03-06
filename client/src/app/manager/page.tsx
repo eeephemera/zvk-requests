@@ -1,4 +1,3 @@
-// D:\projects\zvk-requests\client\src\app\manager\page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -18,18 +17,20 @@ export default function ManagerPage() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Функция для получения списка заявок
+  // Функция для получения списка заявок (для менеджера)
   const fetchRequests = async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/requests`, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests`,
+        {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+        }
+      );
 
-      // Обработка 204 для совместимости с текущим сервером
       if (res.status === 204) {
         setRequests([]);
         return;
@@ -45,24 +46,31 @@ export default function ManagerPage() {
       } else {
         throw new Error("Неверный формат данных от сервера");
       }
-    } catch (err: Error) {
-      setError(err.message || "Что-то пошло не так");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Неизвестная ошибка");
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Функция для обновления заявки
+  // Функция для обновления заявки (для менеджера)
   const updateRequest = async (updatedRequest: Request) => {
     setIsUpdating(true);
     setError("");
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/requests`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(updatedRequest),
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${updatedRequest.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(updatedRequest),
+        }
+      );
       if (!res.ok) {
         throw new Error(`Ошибка ${res.status}: Не удалось обновить заявку`);
       }
@@ -70,29 +78,40 @@ export default function ManagerPage() {
       setRequests((prev) =>
         prev.map((req) => (req.id === updatedData.id ? updatedData : req))
       );
-    } catch (err: Error) {
-      setError(err.message || "Что-то пошло не так при обновлении");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Неизвестная ошибка при обновлении");
+      }
     } finally {
       setIsUpdating(false);
     }
   };
 
-  // Функция для удаления заявки
+  // Функция для удаления заявки (для менеджера)
   const deleteRequest = async (id: number) => {
     setIsDeleting(true);
     setError("");
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/requests/${id}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${id}`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+        }
+      );
       if (!res.ok) {
         throw new Error(`Ошибка ${res.status}: Не удалось удалить заявку`);
       }
       setRequests((prev) => prev.filter((req) => req.id !== id));
-    } catch (err: Error) {
-      setError(err.message || "Что-то пошло не так при удалении");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Неизвестная ошибка при удалении");
+      }
     } finally {
       setIsDeleting(false);
     }
@@ -103,7 +122,7 @@ export default function ManagerPage() {
     fetchRequests();
   }, []);
 
-  // Обработчик обновления статуса заявки
+  // Обработчик обновления статуса заявки (например, меняем статус на "processed")
   const handleUpdate = (request: Request) => {
     const updatedRequest = { ...request, status: "processed" };
     updateRequest(updatedRequest);
@@ -116,23 +135,21 @@ export default function ManagerPage() {
     }
   };
 
-  // Отображение состояния загрузки
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500">Загрузка...</p>
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <p className="text-gray-400 text-lg">Загрузка...</p>
       </div>
     );
   }
 
-  // Отображение ошибок с возможностью повторить запрос
   if (error) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center text-center text-red-500">
-        <p>Произошла ошибка: {error}</p>
+      <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-center text-red-400">
+        <p className="mb-4">{error}</p>
         <button
           onClick={fetchRequests}
-          className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+          className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 transition"
         >
           Попробовать снова
         </button>
@@ -140,55 +157,66 @@ export default function ManagerPage() {
     );
   }
 
-  // Основной интерфейс
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-8 bg-gray-100">
-      <h1 className="text-3xl font-bold mb-8 text-gray-800">Список заявок</h1>
-      {requests.length === 0 ? (
-        <p className="text-gray-500">Заявок пока нет.</p>
-      ) : (
-        <ul className="w-full max-w-2xl space-y-6">
-          {requests.map((request) => (
-            <li
-              key={request.id}
-              className="border p-6 rounded-lg bg-white shadow-md hover:shadow-lg transition"
-            >
-              <h2 className="font-bold text-xl text-gray-800">{request.product_name}</h2>
-              <p className="text-gray-600 mt-1">{request.description}</p>
-              <p className="text-sm text-gray-500 mt-2">
-                Статус: <span className="font-medium">{request.status}</span>
-              </p>
-              <p className="text-sm text-gray-500">
-                Дата создания: {new Date(request.created_at).toLocaleString()}
-              </p>
-              <div className="mt-4 flex space-x-3">
-                <button
-                  onClick={() => handleUpdate(request)}
-                  className={`px-4 py-2 rounded text-white font-medium ${
-                    isUpdating
-                      ? "bg-green-300 cursor-not-allowed"
-                      : "bg-green-500 hover:bg-green-600"
-                  } transition`}
-                  disabled={isUpdating}
-                >
-                  {isUpdating ? "Обновление..." : "Обработать"}
-                </button>
-                <button
-                  onClick={() => handleDelete(request.id)}
-                  className={`px-4 py-2 rounded text-white font-medium ${
-                    isDeleting
-                      ? "bg-red-300 cursor-not-allowed"
-                      : "bg-red-500 hover:bg-red-600"
-                  } transition`}
-                  disabled={isDeleting}
-                >
-                  {isDeleting ? "Удаление..." : "Удалить"}
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="min-h-screen bg-gray-900 text-white p-8">
+      <div className="max-w-6xl mx-auto">
+        <h1 className="text-3xl font-bold mb-6 text-center">Список заявок</h1>
+        {requests.length === 0 ? (
+          <p className="text-gray-400 text-center">Заявок пока нет.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-700">
+              <thead className="bg-gray-800">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ID</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Продукт</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Описание</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Статус</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Создано</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Действия</th>
+                </tr>
+              </thead>
+              <tbody className="bg-gray-900 divide-y divide-gray-700">
+                {requests.map((request) => (
+                  <tr key={request.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.id}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.product_name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.description}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.status}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">
+                      {new Date(request.created_at).toLocaleString("ru-RU")}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <button
+                        onClick={() => handleUpdate(request)}
+                        className={`mr-2 px-3 py-1 rounded ${
+                          isUpdating
+                            ? "bg-green-500 opacity-50 cursor-not-allowed"
+                            : "bg-green-600 hover:bg-green-700"
+                        } transition`}
+                        disabled={isUpdating}
+                      >
+                        Обработать
+                      </button>
+                      <button
+                        onClick={() => handleDelete(request.id)}
+                        className={`px-3 py-1 rounded ${
+                          isDeleting
+                            ? "bg-red-500 opacity-50 cursor-not-allowed"
+                            : "bg-red-600 hover:bg-red-700"
+                        } transition`}
+                        disabled={isDeleting}
+                      >
+                        Удалить
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
