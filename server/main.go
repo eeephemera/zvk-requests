@@ -12,71 +12,100 @@ import (
 	"github.com/eeephemera/zvk-requests/handlers"
 	"github.com/eeephemera/zvk-requests/middleware"
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	// Создаем контекст для всего приложения
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("Ошибка загрузки .env файла")
+	}
+
+	requiredEnv := []string{
+		"JWT_SECRET",
+		"DB_HOST",
+		"DB_PORT",
+		"DB_USER",
+		"DB_PASSWORD",
+		"DB_NAME",
+	}
+	for _, envVar := range requiredEnv {
+		if os.Getenv(envVar) == "" {
+			log.Fatalf("Переменная окружения %s не установлена", envVar)
+		}
+	}
+
+	middleware.SetJWTSecret(os.Getenv("JWT_SECRET"))
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Инициализация соединения с базой данных
-	db.ConnectDB(ctx)
+	if err := db.ConnectDB(ctx); err != nil {
+		log.Fatalf("Ошибка подключения к базе данных: %v", err)
+	}
 	defer db.CloseDBConnection()
 
-	// Получение пула соединений с БД
-	pool := db.GetDBConnection()
+	pool := db.GetPool()
+	if pool == nil {
+		log.Fatal("Не удалось получить пул подключений к БД")
+	}
 
-	// Инициализация репозитория заявок
 	requestRepo := db.NewRequestRepository(pool)
 	requestHandler := handlers.RequestHandler{Repo: requestRepo}
 
-	// Настройка маршрутов
 	r := mux.NewRouter()
 
-	// Маршруты для пользователей
-	r.HandleFunc("/register", handlers.RegisterUser).Methods(http.MethodPost)
-	r.HandleFunc("/login", handlers.LoginUser).Methods(http.MethodPost)
+	// CORS middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-	// Маршруты для работы с заявками (с middleware проверки токена)
-	r.Handle("/requests", middleware.ValidateToken(http.HandlerFunc(requestHandler.CreateRequestHandler))).Methods(http.MethodPost)
-	r.Handle("/requests", middleware.ValidateToken(http.HandlerFunc(requestHandler.GetRequestsByUserHandler))).Methods(http.MethodGet)
-	r.Handle("/requests", middleware.ValidateToken(http.HandlerFunc(requestHandler.UpdateRequestHandler))).Methods(http.MethodPut)
-	r.Handle("/requests/{id}", middleware.ValidateToken(http.HandlerFunc(requestHandler.DeleteRequestHandler))).Methods(http.MethodDelete)
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
 
-	// Тестовый маршрут для авторизованных пользователей
-	r.Handle("/dashboard", middleware.ValidateToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Welcome to the dashboard"))
-	}))).Methods(http.MethodGet)
+			next.ServeHTTP(w, r)
+		})
+	})
 
-	// Настройка HTTP-сервера
+	// Public routes
+	r.HandleFunc("/api/register", handlers.RegisterUser).Methods("POST")
+	r.HandleFunc("/api/login", handlers.LoginUser).Methods("POST")
+
+	// Protected routes
+	authRouter := r.PathPrefix("/api").Subrouter()
+	authRouter.Use(middleware.ValidateToken)
+	authRouter.HandleFunc("/requests", requestHandler.CreateRequestHandler).Methods("POST")
+	authRouter.HandleFunc("/requests", requestHandler.GetRequestsByUserHandler).Methods("GET")
+	authRouter.HandleFunc("/requests", requestHandler.UpdateRequestHandler).Methods("PUT")
+	authRouter.HandleFunc("/requests/{id}", requestHandler.DeleteRequestHandler).Methods("DELETE")
+
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":8081",
 		Handler: r,
 	}
 
-	// Канал для обработки системных сигналов
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, os.Interrupt)
 
-	// Запуск сервера в отдельной горутине
 	go func() {
-		log.Println("Server is running on http://localhost:8080")
+		log.Printf("Сервер запущен на %s\n", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Could not listen on %s: %v\n", server.Addr, err)
+			log.Fatalf("Ошибка сервера: %v", err)
 		}
 	}()
 
-	// Ожидание сигнала завершения
-	<-stop
-	log.Println("Shutting down server...")
+	<-stopChan
+	log.Println("Остановка сервера...")
 
-	// Контекст для graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Server shutdown failed: %v", err)
+		log.Printf("Ошибка при завершении работы: %v\n", err)
 	}
 
-	log.Println("Server exited gracefully")
+	log.Println("Сервер успешно остановлен")
 }

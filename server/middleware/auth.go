@@ -1,61 +1,81 @@
+// middleware/auth.go (пример)
 package middleware
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"net/http"
-	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Объявление jwtSecret
-var jwtSecret = []byte("qwerty123")
-
-// Определяем ключ для контекста, чтобы избежать конфликтов
+// Ключи контекста
 type contextKey string
 
-const userIDKey contextKey = "userID"
+const (
+	UserIDKey contextKey = "userID"
+	RoleKey   contextKey = "role"
+)
 
-// ValidateToken - middleware для проверки JWT токена
+// Глобальная переменная для хранения секрета
+var jwtSecret []byte
+
+// Установить секретный ключ (вызывается из main.go)
+func SetJWTSecret(secret string) {
+	jwtSecret = []byte(secret)
+}
+
+// Получить текущий секрет
+func GetJWTSecret() []byte {
+	return jwtSecret
+}
+
+// ValidateToken — middleware для проверки JWT, извлекаемого из куки
 func ValidateToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "Authorization header is missing", http.StatusUnauthorized)
+		cookie, err := r.Cookie("token")
+		if err != nil {
+			log.Println("ValidateToken: no cookie found:", err)
+			http.Error(w, "Authorization cookie is missing", http.StatusUnauthorized)
 			return
 		}
-
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			http.Error(w, "Invalid token format", http.StatusUnauthorized)
-			return
-		}
-
+		log.Println("ValidateToken: received token:", cookie.Value)
+		// Далее – разбор и проверка JWT...
+		tokenString := cookie.Value
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
 			return jwtSecret, nil
 		})
-
 		if err != nil || !token.Valid {
+			log.Printf("ValidateToken: token invalid: %v", err)
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
-
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			userID, ok := claims["id"].(float64)
-			if !ok {
-				http.Error(w, "Invalid token payload", http.StatusUnauthorized)
-				return
-			}
-
-			// Используем кастомный ключ вместо string
-			ctx := context.WithValue(r.Context(), userIDKey, int(userID))
-			next.ServeHTTP(w, r.WithContext(ctx))
+		// Если все OK, выводим информацию о пользователе:
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			log.Println("ValidateToken: failed to parse claims")
+			http.Error(w, "Failed to parse token claims", http.StatusUnauthorized)
 			return
 		}
-
-		http.Error(w, "Failed to parse token claims", http.StatusUnauthorized)
+		idValue, ok := claims["id"].(float64)
+		if !ok {
+			log.Println("ValidateToken: invalid id in claims")
+			http.Error(w, "Invalid user ID in token", http.StatusUnauthorized)
+			return
+		}
+		role, ok := claims["role"].(string)
+		if !ok {
+			log.Println("ValidateToken: invalid role in claims")
+			http.Error(w, "Invalid user role in token", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("ValidateToken: token OK: userID=%d, role=%s", int(idValue), role)
+		ctx := context.WithValue(r.Context(), UserIDKey, int(idValue))
+		ctx = context.WithValue(ctx, RoleKey, role)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

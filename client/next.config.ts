@@ -1,17 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Прокси для API запросов
   async rewrites() {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:5000/api/:path*', // Прокси на сервер Go
+        destination: 'http://localhost:8081/api/:path*',
       },
-    ]
+    ];
   },
-  // Дополнительные настройки, если они нужны
-  reactStrictMode: true,  // Для включения режима строгой проверки
+  reactStrictMode: true,
 };
 
 export default nextConfig;

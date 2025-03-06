@@ -1,28 +1,34 @@
 package utils
 
 import (
-	"log"
+	"errors"
+	"fmt"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
-// HashPassword хэширует пароль с использованием bcrypt.
 func HashPassword(password string) (string, error) {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err := ValidatePassword(password); err != nil {
+		return "", fmt.Errorf("invalid password: %w", err)
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 	if err != nil {
-		log.Println("Error hashing password:", err)
-		return "", err
+		return "", fmt.Errorf("failed to hash password: %w", err)
 	}
 	return string(hashedPassword), nil
 }
 
-// CheckPasswordHash проверяет, совпадает ли введенный пароль с хэшированным.
-func CheckPasswordHash(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	if err != nil {
-		log.Printf("Error comparing password: %v\n", err)
-		log.Printf("Password: %s\n", password)
-		log.Printf("Hash: %s\n", hash)
+func CheckPasswordHash(password, hash string) error {
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+		return fmt.Errorf("password verification failed: %w", err)
 	}
-	return err == nil
+	return nil
+}
+
+func ValidatePassword(password string) error {
+	if len(password) < 8 {
+		return errors.New("password must be at least 8 characters")
+	}
+	return nil
 }
