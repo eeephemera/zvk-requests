@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import Modal from "../../components/Modal"; // Предполагается, что компонент Modal уже создан
 
 interface Request {
   id: number;
@@ -14,22 +16,20 @@ export default function ManagerPage() {
   const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
+  const [deleteModalId, setDeleteModalId] = useState<number | null>(null);
+  const router = useRouter();
 
-  // Функция для получения списка заявок (для менеджера)
-  const fetchRequests = async () => {
+  const fetchRequests = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests`,
-        {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-        }
-      );
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
 
       if (res.status === 204) {
         setRequests([]);
@@ -37,7 +37,15 @@ export default function ManagerPage() {
       }
 
       if (!res.ok) {
-        throw new Error(`Ошибка ${res.status}: Не удалось загрузить заявки`);
+        if (res.status === 401) {
+          setError("Не авторизован. Перенаправляем на вход...");
+          setTimeout(() => router.push("/login"), 2000);
+          return;
+        } else if (res.status === 403) {
+          setError("У вас нет прав для просмотра заявок.");
+        } else {
+          throw new Error(`Ошибка ${res.status}: Не удалось загрузить заявки`);
+        }
       }
 
       const data = await res.json();
@@ -47,19 +55,14 @@ export default function ManagerPage() {
         throw new Error("Неверный формат данных от сервера");
       }
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Неизвестная ошибка");
-      }
+      setError(err instanceof Error ? err.message : "Неизвестная ошибка");
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
 
-  // Функция для обновления заявки (для менеджера)
-  const updateRequest = async (updatedRequest: Request) => {
-    setIsUpdating(true);
+  const updateRequest = useCallback(async (updatedRequest: Request) => {
+    setUpdatingIds((prev) => new Set(prev).add(updatedRequest.id));
     setError("");
     try {
       const res = await fetch(
@@ -79,19 +82,18 @@ export default function ManagerPage() {
         prev.map((req) => (req.id === updatedData.id ? updatedData : req))
       );
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Неизвестная ошибка при обновлении");
-      }
+      setError(err instanceof Error ? err.message : "Неизвестная ошибка при обновлении");
     } finally {
-      setIsUpdating(false);
+      setUpdatingIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(updatedRequest.id);
+        return newSet;
+      });
     }
-  };
+  }, []);
 
-  // Функция для удаления заявки (для менеджера)
-  const deleteRequest = async (id: number) => {
-    setIsDeleting(true);
+  const deleteRequest = useCallback(async (id: number) => {
+    setDeletingIds((prev) => new Set(prev).add(id));
     setError("");
     try {
       const res = await fetch(
@@ -107,31 +109,33 @@ export default function ManagerPage() {
       }
       setRequests((prev) => prev.filter((req) => req.id !== id));
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Неизвестная ошибка при удалении");
-      }
+      setError(err instanceof Error ? err.message : "Неизвестная ошибка при удалении");
     } finally {
-      setIsDeleting(false);
+      setDeletingIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
     }
-  };
-
-  // Загружаем заявки при монтировании компонента
-  useEffect(() => {
-    fetchRequests();
   }, []);
 
-  // Обработчик обновления статуса заявки (например, меняем статус на "processed")
+  useEffect(() => {
+    fetchRequests();
+  }, [fetchRequests]);
+
   const handleUpdate = (request: Request) => {
     const updatedRequest = { ...request, status: "processed" };
     updateRequest(updatedRequest);
   };
 
-  // Обработчик удаления заявки
   const handleDelete = (id: number) => {
-    if (window.confirm("Вы уверены, что хотите удалить эту заявку?")) {
-      deleteRequest(id);
+    setDeleteModalId(id);
+  };
+
+  const confirmDelete = () => {
+    if (deleteModalId !== null) {
+      deleteRequest(deleteModalId);
+      setDeleteModalId(null);
     }
   };
 
@@ -165,15 +169,15 @@ export default function ManagerPage() {
           <p className="text-gray-400 text-center">Заявок пока нет.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-700">
+            <table className="min-w-full divide-y divide-gray-700" aria-label="Список заявок">
               <thead className="bg-gray-800">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ID</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Продукт</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Описание</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Статус</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Создано</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Действия</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ID</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Продукт</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Описание</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Статус</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Создано</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Действия</th>
                 </tr>
               </thead>
               <tbody className="bg-gray-900 divide-y divide-gray-700">
@@ -190,24 +194,24 @@ export default function ManagerPage() {
                       <button
                         onClick={() => handleUpdate(request)}
                         className={`mr-2 px-3 py-1 rounded ${
-                          isUpdating
+                          updatingIds.has(request.id)
                             ? "bg-green-500 opacity-50 cursor-not-allowed"
                             : "bg-green-600 hover:bg-green-700"
                         } transition`}
-                        disabled={isUpdating}
+                        disabled={updatingIds.has(request.id)}
                       >
-                        Обработать
+                        {updatingIds.has(request.id) ? "Обработка..." : "Обработать"}
                       </button>
                       <button
                         onClick={() => handleDelete(request.id)}
                         className={`px-3 py-1 rounded ${
-                          isDeleting
+                          deletingIds.has(request.id)
                             ? "bg-red-500 opacity-50 cursor-not-allowed"
                             : "bg-red-600 hover:bg-red-700"
                         } transition`}
-                        disabled={isDeleting}
+                        disabled={deletingIds.has(request.id)}
                       >
-                        Удалить
+                        {deletingIds.has(request.id) ? "Удаление..." : "Удалить"}
                       </button>
                     </td>
                   </tr>
@@ -217,6 +221,24 @@ export default function ManagerPage() {
           </div>
         )}
       </div>
+      <Modal isOpen={deleteModalId !== null} onClose={() => setDeleteModalId(null)}>
+        <h2 className="text-xl font-bold mb-4 text-white">Подтверждение удаления</h2>
+        <p className="text-gray-300">Вы уверены, что хотите удалить эту заявку?</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            onClick={() => setDeleteModalId(null)}
+            className="px-4 py-2 bg-gray-600 rounded text-white"
+          >
+            Отмена
+          </button>
+          <button
+            onClick={confirmDelete}
+            className="px-4 py-2 bg-red-600 rounded text-white"
+          >
+            Удалить
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
