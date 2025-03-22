@@ -2,21 +2,27 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Modal from "../../components/Modal"; // Предполагается, что компонент Modal уже создан
+import Modal from "../../components/Modal";
 
 interface Request {
   id: number;
-  product_name: string;
-  description: string;
+  user_id: number;
+  inn: string;
+  organization_name: string;
+  implementation_date: string;
+  fz_type: string;
+  registry_type: string;
+  comment: string;
+  tz_file: string; // or Blob, depending on server response
   status: string;
   created_at: string;
+  updated_at: string;
 }
 
 export default function ManagerPage() {
   const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
   const [deleteModalId, setDeleteModalId] = useState<number | null>(null);
   const router = useRouter();
@@ -62,7 +68,6 @@ export default function ManagerPage() {
   }, [router]);
 
   const updateRequest = useCallback(async (updatedRequest: Request) => {
-    setUpdatingIds((prev) => new Set(prev).add(updatedRequest.id));
     setError("");
     try {
       const res = await fetch(
@@ -83,12 +88,6 @@ export default function ManagerPage() {
       );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка при обновлении");
-    } finally {
-      setUpdatingIds((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(updatedRequest.id);
-        return newSet;
-      });
     }
   }, []);
 
@@ -123,9 +122,12 @@ export default function ManagerPage() {
     fetchRequests();
   }, [fetchRequests]);
 
-  const handleUpdate = (request: Request) => {
-    const updatedRequest = { ...request, status: "processed" };
-    updateRequest(updatedRequest);
+  const handleStatusChange = (id: number, newStatus: string) => {
+    const request = requests.find(r => r.id === id);
+    if (request) {
+      const updatedRequest = { ...request, status: newStatus };
+      updateRequest(updatedRequest);
+    }
   };
 
   const handleDelete = (id: number) => {
@@ -153,7 +155,7 @@ export default function ManagerPage() {
         <p className="mb-4">{error}</p>
         <button
           onClick={fetchRequests}
-          className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700 transition"
+          className="px-4 py-2 bg-blue-600 rounded text-white"
         >
           Попробовать снова
         </button>
@@ -173,8 +175,12 @@ export default function ManagerPage() {
               <thead className="bg-gray-800">
                 <tr>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ID</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Продукт</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Описание</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">INN</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Организация</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Дата реализации</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ФЗ</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Реестр</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Комментарий</th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Статус</th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Создано</th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Действия</th>
@@ -184,24 +190,25 @@ export default function ManagerPage() {
                 {requests.map((request) => (
                   <tr key={request.id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.id}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.product_name}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.description}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.status}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">
-                      {new Date(request.created_at).toLocaleString("ru-RU")}
-                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.inn}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.organization_name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{new Date(request.implementation_date).toLocaleDateString("ru-RU")}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.fz_type}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.registry_type}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.comment}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button
-                        onClick={() => handleUpdate(request)}
-                        className={`mr-2 px-3 py-1 rounded ${
-                          updatingIds.has(request.id)
-                            ? "bg-green-500 opacity-50 cursor-not-allowed"
-                            : "bg-green-600 hover:bg-green-700"
-                        } transition`}
-                        disabled={updatingIds.has(request.id)}
+                      <select
+                        value={request.status}
+                        onChange={(e) => handleStatusChange(request.id, e.target.value)}
+                        className="p-1 rounded bg-gray-700 text-white"
                       >
-                        {updatingIds.has(request.id) ? "Обработка..." : "Обработать"}
-                      </button>
+                        <option value="На рассмотрении">На рассмотрении</option>
+                        <option value="В работе">В работе</option>
+                        <option value="Завершена">Завершена</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{new Date(request.created_at).toLocaleString("ru-RU")}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <button
                         onClick={() => handleDelete(request.id)}
                         className={`px-3 py-1 rounded ${

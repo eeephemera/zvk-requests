@@ -54,13 +54,13 @@ export default function RequestsPage() {
       console.log("Request submitted, ID:", data.requestId);
       setSuccess("Заявка успешно отправлена!");
       setTimeout(() => {
-        setInn("");
-        setOrganizationName("");
-        setTzFile(null);
-        setImplementationDate("");
-        setFzType("223");
-        setComment("");
-        setRegistryType("registry");
+        // setInn("");
+        // setOrganizationName("");
+        // setTzFile(null);
+        // setImplementationDate("");
+        // setFzType("223");
+        // setComment("");
+        // setRegistryType("registry");
       }, 1000);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");

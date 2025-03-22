@@ -23,3 +23,12 @@ CREATE INDEX idx_users_email ON users(email);
 CREATE TABLE statuses (name VARCHAR(50) PRIMARY KEY);
 INSERT INTO statuses VALUES ('На рассмотрении'), ('В работе'), ('Завершена');
 ALTER TABLE requests ADD FOREIGN KEY (status) REFERENCES statuses(name);
+
+ALTER TABLE requests
+ADD COLUMN inn VARCHAR(255),
+ADD COLUMN organization_name VARCHAR(255),
+ADD COLUMN implementation_date TIMESTAMP,
+ADD COLUMN fz_type VARCHAR(10),      -- Для "223" или "44"
+ADD COLUMN registry_type VARCHAR(50), -- Для "registry" или "non-registry"
+ADD COLUMN comment TEXT;
+

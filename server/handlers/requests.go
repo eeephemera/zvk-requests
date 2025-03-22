@@ -3,10 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
+	"time"
 
 	"github.com/eeephemera/zvk-requests/db"
 	"github.com/eeephemera/zvk-requests/middleware"
@@ -37,42 +38,69 @@ func respondWithError(w http.ResponseWriter, code int, message string) {
 
 // CreateRequestHandler — обработчик для создания новой заявки (для пользователя)
 func (h *RequestHandler) CreateRequestHandler(w http.ResponseWriter, r *http.Request) {
-	var req models.Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+	err := r.ParseMultipartForm(10 << 20) // 10 MB max
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to parse form")
 		return
 	}
 
-	// Проверка обязательных полей (например, Description)
-	if req.Description == "" {
-		respondWithError(w, http.StatusBadRequest, "Description is required")
+	// Extract fields
+	inn := r.FormValue("inn")
+	organizationName := r.FormValue("organization_name")
+	implementationDateStr := r.FormValue("implementation_date")
+	fzType := r.FormValue("fz_type")
+	comment := r.FormValue("comment")
+	registryType := r.FormValue("registry_type")
+
+	// Parse date
+	implementationDate, err := time.Parse("2006-01-02", implementationDateStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid implementation date")
 		return
 	}
 
-	// Извлекаем userID из контекста (проставляется middleware.ValidateToken)
+	// Get file
+	file, _, err := r.FormFile("tz_file")
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to get file")
+		return
+	}
+	defer file.Close()
+
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to read file")
+		return
+	}
+
+	// Get userID from context
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {
 		respondWithError(w, http.StatusUnauthorized, "User not authenticated")
 		return
 	}
-	req.UserID = userID
 
-	// Устанавливаем статус по умолчанию, если не задан
-	if req.Status == "" {
-		req.Status = "На рассмотрении"
+	// Create request object
+	req := &models.Request{
+		UserID:             userID,
+		INN:                inn,
+		OrganizationName:   organizationName,
+		ImplementationDate: implementationDate,
+		FZType:             fzType,
+		RegistryType:       registryType,
+		Comment:            comment,
+		TZFile:             fileBytes,
+		Status:             "На рассмотрении",
 	}
 
-	// Создаем заявку в БД через репозиторий
-	if err := h.Repo.CreateRequest(r.Context(), &req); err != nil {
+	// Save to database
+	if err := h.Repo.CreateRequest(r.Context(), req); err != nil {
 		log.Printf("Create request error: %v", err)
-		if strings.Contains(err.Error(), "unique constraint") {
-			respondWithError(w, http.StatusConflict, "Request already exists")
-			return
-		}
 		respondWithError(w, http.StatusInternalServerError, "Failed to create request")
 		return
 	}
 
+	// Respond with success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(req)
@@ -107,20 +135,59 @@ func (h *RequestHandler) GetRequestsByUserHandler(w http.ResponseWriter, r *http
 
 // UpdateRequestHandler — обработчик для обновления заявки пользователем
 func (h *RequestHandler) UpdateRequestHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse multipart form
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to parse form")
+		return
+	}
+
+	// Extract fields
+	idStr := r.FormValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request ID")
+		return
+	}
+
+	inn := r.FormValue("inn")
+	organizationName := r.FormValue("organization_name")
+	implementationDateStr := r.FormValue("implementation_date")
+	fzType := r.FormValue("fz_type")
+	comment := r.FormValue("comment")
+	registryType := r.FormValue("registry_type")
+
+	// Parse date
+	implementationDate, err := time.Parse("2006-01-02", implementationDateStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid implementation date")
+		return
+	}
+
+	// Get file if provided
+	var tzFile []byte
+	file, _, err := r.FormFile("tz_file")
+	if err == nil {
+		defer file.Close()
+		tzFile, err = io.ReadAll(file)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to read file")
+			return
+		}
+	} else if !errors.Is(err, http.ErrMissingFile) {
+		respondWithError(w, http.StatusBadRequest, "Failed to get file")
+		return
+	}
+
+	// Get userID from context
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {
 		respondWithError(w, http.StatusUnauthorized, "User not authenticated")
 		return
 	}
 
-	var req models.Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	// Проверяем, что заявка существует и принадлежит текущему пользователю
-	existingReq, err := h.Repo.GetRequestByID(r.Context(), req.ID, userID)
+	// Get existing request to check ownership and get current TZFile if no new file
+	existingReq, err := h.Repo.GetRequestByID(r.Context(), id, userID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			respondWithError(w, http.StatusNotFound, "Request not found")
@@ -131,11 +198,27 @@ func (h *RequestHandler) UpdateRequestHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Сохраняем неизменяемые поля
-	req.UserID = existingReq.UserID
-	req.CreatedAt = existingReq.CreatedAt
+	// If no new file, use existing TZFile
+	if tzFile == nil {
+		tzFile = existingReq.TZFile
+	}
 
-	if err := h.Repo.UpdateRequest(r.Context(), &req); err != nil {
+	// Create updated request object
+	updatedReq := &models.Request{
+		ID:                 id,
+		UserID:             userID,
+		INN:                inn,
+		OrganizationName:   organizationName,
+		ImplementationDate: implementationDate,
+		FZType:             fzType,
+		RegistryType:       registryType,
+		Comment:            comment,
+		TZFile:             tzFile,
+		Status:             existingReq.Status,
+	}
+
+	// Update in database
+	if err := h.Repo.UpdateRequest(r.Context(), updatedReq); err != nil {
 		log.Printf("Update request error: %v", err)
 		respondWithError(w, http.StatusInternalServerError, "Failed to update request")
 		return
@@ -143,7 +226,7 @@ func (h *RequestHandler) UpdateRequestHandler(w http.ResponseWriter, r *http.Req
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(req)
+	json.NewEncoder(w).Encode(updatedReq)
 }
 
 // DeleteRequestHandler — обработчик для удаления заявки пользователем
@@ -198,16 +281,55 @@ func (h *RequestHandler) GetAllRequestsHandler(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(requests)
 }
 
-// UpdateRequestByManagerHandler — обработчик для обновления заявки менеджером (без проверки владельца)
+// UpdateRequestByManagerHandler — обработчик для обновления заявки менеджером
 func (h *RequestHandler) UpdateRequestByManagerHandler(w http.ResponseWriter, r *http.Request) {
-	var req models.Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+	// Parse multipart form
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to parse form")
 		return
 	}
 
-	// Получаем заявку без фильтра по userID
-	existingReq, err := h.Repo.GetRequestByIDWithoutUser(r.Context(), req.ID)
+	// Extract fields
+	idStr := r.FormValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request ID")
+		return
+	}
+
+	inn := r.FormValue("inn")
+	organizationName := r.FormValue("organization_name")
+	implementationDateStr := r.FormValue("implementation_date")
+	fzType := r.FormValue("fz_type")
+	comment := r.FormValue("comment")
+	registryType := r.FormValue("registry_type")
+	status := r.FormValue("status")
+
+	// Parse date
+	implementationDate, err := time.Parse("2006-01-02", implementationDateStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid implementation date")
+		return
+	}
+
+	// Get file if provided
+	var tzFile []byte
+	file, _, err := r.FormFile("tz_file")
+	if err == nil {
+		defer file.Close()
+		tzFile, err = io.ReadAll(file)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to read file")
+			return
+		}
+	} else if !errors.Is(err, http.ErrMissingFile) {
+		respondWithError(w, http.StatusBadRequest, "Failed to get file")
+		return
+	}
+
+	// Get existing request to get current TZFile if no new file
+	existingReq, err := h.Repo.GetRequestByIDWithoutUser(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			respondWithError(w, http.StatusNotFound, "Request not found")
@@ -218,12 +340,27 @@ func (h *RequestHandler) UpdateRequestByManagerHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	// Сохраняем неизменяемые поля
-	req.UserID = existingReq.UserID
-	req.CreatedAt = existingReq.CreatedAt
+	// If no new file, use existing TZFile
+	if tzFile == nil {
+		tzFile = existingReq.TZFile
+	}
 
-	// Используем метод UpdateRequestWithoutUser для обновления заявки менеджером
-	if err := h.Repo.UpdateRequestWithoutUser(r.Context(), &req); err != nil {
+	// Create updated request object
+	updatedReq := &models.Request{
+		ID:                 id,
+		UserID:             existingReq.UserID,
+		INN:                inn,
+		OrganizationName:   organizationName,
+		ImplementationDate: implementationDate,
+		FZType:             fzType,
+		RegistryType:       registryType,
+		Comment:            comment,
+		TZFile:             tzFile,
+		Status:             status,
+	}
+
+	// Update in database
+	if err := h.Repo.UpdateRequestWithoutUser(r.Context(), updatedReq); err != nil {
 		log.Printf("Manager update request error: %v", err)
 		respondWithError(w, http.StatusInternalServerError, "Failed to update request")
 		return
@@ -231,10 +368,10 @@ func (h *RequestHandler) UpdateRequestByManagerHandler(w http.ResponseWriter, r 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(req)
+	json.NewEncoder(w).Encode(updatedReq)
 }
 
-// DeleteRequestByManagerHandler — обработчик для удаления заявки менеджером (без проверки владельца)
+// DeleteRequestByManagerHandler — обработчик для удаления заявки менеджером
 func (h *RequestHandler) DeleteRequestByManagerHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	requestID, err := strconv.Atoi(vars["id"])
