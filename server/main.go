@@ -10,6 +10,7 @@ import (
 
 	"github.com/eeephemera/zvk-requests/db"
 	"github.com/eeephemera/zvk-requests/handlers"
+	"github.com/eeephemera/zvk-requests/handlers/requests"
 	"github.com/eeephemera/zvk-requests/middleware"
 	"github.com/eeephemera/zvk-requests/models"
 	"github.com/gorilla/mux"
@@ -56,7 +57,7 @@ func main() {
 
 	// Инициализируем обработчик заявок с репозиторием
 	requestRepo := db.NewRequestRepository(pool)
-	requestHandler := handlers.RequestHandler{Repo: requestRepo}
+	requestHandler := &requests.RequestHandler{Repo: requestRepo}
 
 	// Создаем основной роутер
 	r := mux.NewRouter()
@@ -65,12 +66,12 @@ func main() {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-			if origin == "http://localhost:3001" {
+			if origin == "http://localhost:3000" {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie")
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
@@ -92,21 +93,17 @@ func main() {
 	userRouter.Use(middleware.RequireRole(string(models.RoleUser)))
 	userRouter.HandleFunc("", requestHandler.CreateRequestHandler).Methods("POST")
 	userRouter.HandleFunc("", requestHandler.GetRequestsByUserHandler).Methods("GET")
-	userRouter.HandleFunc("", requestHandler.UpdateRequestHandler).Methods("PUT")
+	userRouter.HandleFunc("/{id}", requestHandler.UpdateRequestHandler).Methods("PUT")
 	userRouter.HandleFunc("/{id}", requestHandler.DeleteRequestHandler).Methods("DELETE")
 
 	// --- Маршруты для менеджеров (Менеджер) ---
 	managerRouter := authRouter.PathPrefix("/manager/requests").Subrouter()
 	managerRouter.Use(middleware.RequireRole(string(models.RoleManager)))
-
-	// Менеджер может получать все заявки
 	managerRouter.HandleFunc("", requestHandler.GetAllRequestsHandler).Methods("GET")
-
-	// Менеджер может обновлять заявки (не проверяя владельца)
 	managerRouter.HandleFunc("/{id}", requestHandler.UpdateRequestByManagerHandler).Methods("PUT")
-
-	// Менеджер может удалять заявки (не проверяя владельца)
 	managerRouter.HandleFunc("/{id}", requestHandler.DeleteRequestByManagerHandler).Methods("DELETE")
+	managerRouter.HandleFunc("/{id}/tz_file", requestHandler.DownloadTZFileHandler).Methods("GET")
+	managerRouter.HandleFunc("/{id}", requestHandler.GetRequestByIDHandler).Methods("GET") // Исправлено: managerRouter вместо managerAPI
 
 	// Создаем HTTP сервер
 	server := &http.Server{

@@ -182,24 +182,24 @@ func (repo *RequestRepository) GetAllRequests(ctx context.Context, limit, offset
 }
 
 // GetRequestByIDWithoutUser возвращает заявку по её ID без фильтрации по user_id (для менеджера).
-func (repo *RequestRepository) GetRequestByIDWithoutUser(ctx context.Context, requestID int) (*models.Request, error) {
+func (r *RequestRepository) GetRequestByIDWithoutUser(ctx context.Context, id int) (*models.Request, error) {
 	query := `
-		SELECT id, user_id, inn, organization_name, implementation_date, fz_type, 
-			   registry_type, comment, tz_file, status, created_at, updated_at
-		FROM requests
-		WHERE id = $1
-	`
+        SELECT id, user_id, inn, organization_name, implementation_date, fz_type, 
+               registry_type, comment, tz_file, status, created_at, updated_at
+        FROM requests
+        WHERE id = $1
+    `
 	var req models.Request
-	err := repo.pool.QueryRow(ctx, query, requestID).Scan(
+	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&req.ID, &req.UserID, &req.INN, &req.OrganizationName, &req.ImplementationDate,
 		&req.FZType, &req.RegistryType, &req.Comment, &req.TZFile, &req.Status,
 		&req.CreatedAt, &req.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("request not found: id=%d", requestID)
+			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to fetch request: %w", err)
+		return nil, err
 	}
 	return &req, nil
 }

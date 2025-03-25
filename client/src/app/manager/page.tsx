@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Modal from "../../components/Modal";
 
 interface Request {
@@ -13,7 +13,7 @@ interface Request {
   fz_type: string;
   registry_type: string;
   comment: string;
-  tz_file: string; // or Blob, depending on server response
+  tz_file: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -21,205 +21,220 @@ interface Request {
 
 export default function ManagerPage() {
   const [requests, setRequests] = useState<Request[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [selectedRequest, setSelectedRequest] = useState<Request | null>(null);
   const [error, setError] = useState("");
-  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
-  const [deleteModalId, setDeleteModalId] = useState<number | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingSingleRequest, setLoadingSingleRequest] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const fetchRequests = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests`, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-      });
-
-      if (res.status === 204) {
+  // Фетч списка заявок при монтировании компонента
+  useEffect(() => {
+    const fetchRequests = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests`, {
+          credentials: "include",
+        });
+        if (!res.ok) {
+          throw new Error("Не удалось загрузить заявки");
+        }
+        const data = await res.json();
+        // Убедимся, что data всегда массив, даже если сервер вернул null
+        setRequests(Array.isArray(data) ? data : []);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Неизвестная ошибка");
+        // В случае ошибки устанавливаем пустой массив, а не null     
         setRequests([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRequests();
+  }, []);
+
+  // Установка selectedRequest на основе параметров URL
+  useEffect(() => {
+    const requestId = searchParams.get("requestId");
+    
+    // Не делаем запрос, если в процессе удаления
+    if (isDeleting || !requestId) {
+      if (!requestId) {
+        setSelectedRequest(null);
+        setRequestError(null);
+      }
+      return;
+    }
+    
+    const id = parseInt(requestId, 10);
+    const request = requests.find((req) => req.id === id);
+    if (request) {
+      setSelectedRequest(request);
+      setRequestError(null);
+    } else {
+      // Фетч отдельной заявки, если её нет в списке
+      const fetchSingleRequest = async () => {
+        setLoadingSingleRequest(true);
+        try {
+          const res = await fetch(
+            `${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${id}`,
+            { credentials: "include" }
+          );
+          if (res.ok) {
+            const singleRequest = await res.json();
+            setSelectedRequest(singleRequest);
+            setRequestError(null);
+          } else if (res.status === 404) {
+            // Заявка не найдена - очищаем параметр requestId из URL без показа ошибки
+            setSelectedRequest(null);
+            console.log(`Заявка с ID ${id} не найдена, очищаем URL`);
+            router.replace("/manager", { scroll: false });
+          } else {
+            setSelectedRequest(null);
+            setRequestError("Ошибка при загрузке заявки");
+          }
+        } catch (err: unknown) {
+          setSelectedRequest(null);
+          setRequestError(err instanceof Error ? err.message : "Ошибка при загрузке заявки");
+        } finally {
+          setLoadingSingleRequest(false);
+        }
+      };
+      fetchSingleRequest();
+    }
+  }, [searchParams, requests, router, isDeleting]);
+
+  // Удаление заявки с синхронизацией на сервере
+  const handleDelete = async (id: number) => {
+    if (loadingSingleRequest || isDeleting) return;
+    
+    try {
+      setLoadingSingleRequest(true);
+      setIsDeleting(true);
+      
+      // Сначала очищаем URL и закрываем модальное окно
+      setSelectedRequest(null);
+      router.replace("/manager", { scroll: false });
+      
+      // Проверяем, существует ли заявка в локальном состоянии
+      const requestExists = requests.some(req => req.id === id);
+      if (!requestExists) {
+        console.log(`Заявка с ID ${id} уже отсутствует в списке`);
         return;
       }
-
+      
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      
+      // Обработка разных статус-кодов
+      if (res.status === 404) {
+        console.log(`Заявка с ID ${id} не найдена на сервере`);
+        // Тихо удаляем из локального состояния
+        setRequests(prevRequests => (prevRequests || []).filter((req) => req.id !== id));
+        return;
+      }
+      
       if (!res.ok) {
-        if (res.status === 401) {
-          setError("Не авторизован. Перенаправляем на вход...");
-          setTimeout(() => router.push("/login"), 2000);
-          return;
-        } else if (res.status === 403) {
-          setError("У вас нет прав для просмотра заявок.");
-        } else {
-          throw new Error(`Ошибка ${res.status}: Не удалось загрузить заявки`);
-        }
+        const errorData = await res.json().catch(() => ({ error: "Неизвестная ошибка" }));
+        throw new Error(errorData.error || "Не удалось удалить заявку");
       }
-
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setRequests(data);
-      } else {
-        throw new Error("Неверный формат данных от сервера");
-      }
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Неизвестная ошибка");
-    } finally {
-      setLoading(false);
-    }
-  }, [router]);
-
-  const updateRequest = useCallback(async (updatedRequest: Request) => {
-    setError("");
-    try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${updatedRequest.id}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify(updatedRequest),
-        }
-      );
-      if (!res.ok) {
-        throw new Error(`Ошибка ${res.status}: Не удалось обновить заявку`);
-      }
-      const updatedData = await res.json();
-      setRequests((prev) =>
-        prev.map((req) => (req.id === updatedData.id ? updatedData : req))
-      );
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Неизвестная ошибка при обновлении");
-    }
-  }, []);
-
-  const deleteRequest = useCallback(async (id: number) => {
-    setDeletingIds((prev) => new Set(prev).add(id));
-    setError("");
-    try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${id}`,
-        {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-        }
-      );
-      if (!res.ok) {
-        throw new Error(`Ошибка ${res.status}: Не удалось удалить заявку`);
-      }
-      setRequests((prev) => prev.filter((req) => req.id !== id));
-    } catch (err: unknown) {
+      
+      // Успешное удаление
+      console.log(`Заявка с ID ${id} успешно удалена`);
+      setRequests(prevRequests => (prevRequests || []).filter((req) => req.id !== id));
+    } catch (err) {
+      console.error("Ошибка при удалении:", err);
       setError(err instanceof Error ? err.message : "Неизвестная ошибка при удалении");
     } finally {
-      setDeletingIds((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(id);
-        return newSet;
+      setLoadingSingleRequest(false);
+      setTimeout(() => {
+        setIsDeleting(false);
+      }, 500);
+    }
+  };
+
+  // Переход к заявке по клику на строку
+  const handleRowClick = (request: Request) => {
+    router.push(`/manager?requestId=${request.id}`);
+  };
+
+  // Функция обновления статуса заявки
+  const handleStatusUpdate = (id: number, newStatus: string) => {
+    // Обновляем статус в массиве заявок
+    setRequests(prevRequests => 
+      prevRequests.map(req => 
+        req.id === id ? { ...req, status: newStatus } : req
+      )
+    );
+    
+    // Если это выбранная заявка, обновляем и её
+    if (selectedRequest && selectedRequest.id === id) {
+      setSelectedRequest({
+        ...selectedRequest,
+        status: newStatus
       });
     }
-  }, []);
-
-  useEffect(() => {
-    fetchRequests();
-  }, [fetchRequests]);
-
-  const handleStatusChange = (id: number, newStatus: string) => {
-    const request = requests.find(r => r.id === id);
-    if (request) {
-      const updatedRequest = { ...request, status: newStatus };
-      updateRequest(updatedRequest);
-    }
   };
-
-  const handleDelete = (id: number) => {
-    setDeleteModalId(id);
-  };
-
-  const confirmDelete = () => {
-    if (deleteModalId !== null) {
-      deleteRequest(deleteModalId);
-      setDeleteModalId(null);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <p className="text-gray-400 text-lg">Загрузка...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-center text-red-400">
-        <p className="mb-4">{error}</p>
-        <button
-          onClick={fetchRequests}
-          className="px-4 py-2 bg-blue-600 rounded text-white"
-        >
-          Попробовать снова
-        </button>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center">Список заявок</h1>
-        {requests.length === 0 ? (
-          <p className="text-gray-400 text-center">Заявок пока нет.</p>
+    <div className="min-h-screen bg-gray-900 text-white p-6">
+      <div className="container mx-auto">
+        <h1 className="text-2xl font-bold text-white mb-4 text-center">
+          Список заявок (Менеджер)
+        </h1>
+
+        {error && <p className="text-red-400 mb-4 text-center">{error}</p>}
+
+        {loading ? (
+          <p className="text-gray-400 text-center">Загрузка...</p>
+        ) : !requests || requests.length === 0 ? (
+          <p className="text-gray-400 text-center">Заявки отсутствуют.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-700" aria-label="Список заявок">
-              <thead className="bg-gray-800">
-                <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ID</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">INN</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Организация</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Дата реализации</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ФЗ</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Реестр</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Комментарий</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Статус</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Создано</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Действия</th>
+            <table className="min-w-full bg-gray-800 rounded-xl shadow-lg">
+              <thead>
+                <tr className="bg-gray-700 text-gray-300">
+                  <th className="py-3 px-4 text-left font-semibold">ID</th>
+                  <th className="py-3 px-4 text-left font-semibold">Организация</th>
+                  <th className="py-3 px-4 text-left font-semibold">ИНН</th>
+                  <th className="py-3 px-4 text-left font-semibold">Дата</th>
+                  <th className="py-3 px-4 text-left font-semibold">Статус</th>
                 </tr>
               </thead>
-              <tbody className="bg-gray-900 divide-y divide-gray-700">
-                {requests.map((request) => (
-                  <tr key={request.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.id}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.inn}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.organization_name}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{new Date(request.implementation_date).toLocaleDateString("ru-RU")}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.fz_type}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.registry_type}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{request.comment}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <select
-                        value={request.status}
-                        onChange={(e) => handleStatusChange(request.id, e.target.value)}
-                        className="p-1 rounded bg-gray-700 text-white"
-                      >
-                        <option value="На рассмотрении">На рассмотрении</option>
-                        <option value="В работе">В работе</option>
-                        <option value="Завершена">Завершена</option>
-                      </select>
+              <tbody>
+                {requests.map((request, index) => (
+                  <tr
+                    key={request.id}
+                    className={`border-b border-gray-700 cursor-pointer ${
+                      index % 2 === 0 ? "bg-gray-800" : "bg-gray-750"
+                    } hover:bg-gray-600 transition-colors duration-200`}
+                    onClick={() => handleRowClick(request)}
+                  >
+                    <td className="py-3 px-4">{request.id}</td>
+                    <td className="py-3 px-4">{request.organization_name}</td>
+                    <td className="py-3 px-4">{request.inn}</td>
+                    <td className="py-3 px-4">
+                      {new Date(request.implementation_date).toLocaleDateString("ru-RU")}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{new Date(request.created_at).toLocaleString("ru-RU")}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button
-                        onClick={() => handleDelete(request.id)}
-                        className={`px-3 py-1 rounded ${
-                          deletingIds.has(request.id)
-                            ? "bg-red-500 opacity-50 cursor-not-allowed"
-                            : "bg-red-600 hover:bg-red-700"
-                        } transition`}
-                        disabled={deletingIds.has(request.id)}
+                    <td className="py-3 px-4">
+                      <span
+                        className={`px-2 py-1 rounded-full text-sm font-medium ${
+                          request.status === "Новая"
+                            ? "bg-blue-600 text-blue-100"
+                            : request.status === "В обработке"
+                            ? "bg-yellow-600 text-yellow-100"
+                            : request.status === "Выполнена"
+                            ? "bg-green-600 text-green-100"
+                            : "bg-red-600 text-red-100"
+                        }`}
                       >
-                        {deletingIds.has(request.id) ? "Удаление..." : "Удалить"}
-                      </button>
+                        {request.status}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -227,25 +242,28 @@ export default function ManagerPage() {
             </table>
           </div>
         )}
+
+        {loadingSingleRequest && !selectedRequest && (
+          <p className="text-gray-400 text-center mt-4">Загрузка заявки...</p>
+        )}
+
+        {requestError && !isDeleting && (
+          <p className="text-red-400 mb-4 text-center mt-4">{requestError}</p>
+        )}
+
+        {selectedRequest && (
+          <Modal
+            isOpen={true}
+            onClose={() => {
+              router.push("/manager");
+              setRequestError(null);
+            }}
+            request={selectedRequest}
+            onDelete={handleDelete}
+            onStatusUpdate={handleStatusUpdate}
+          />
+        )}
       </div>
-      <Modal isOpen={deleteModalId !== null} onClose={() => setDeleteModalId(null)}>
-        <h2 className="text-xl font-bold mb-4 text-white">Подтверждение удаления</h2>
-        <p className="text-gray-300">Вы уверены, что хотите удалить эту заявку?</p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            onClick={() => setDeleteModalId(null)}
-            className="px-4 py-2 bg-gray-600 rounded text-white"
-          >
-            Отмена
-          </button>
-          <button
-            onClick={confirmDelete}
-            className="px-4 py-2 bg-red-600 rounded text-white"
-          >
-            Удалить
-          </button>
-        </div>
-      </Modal>
     </div>
   );
 }

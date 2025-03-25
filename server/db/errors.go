@@ -5,5 +5,5 @@ import "errors"
 
 var (
 	ErrAlreadyExists = errors.New("already exists")
-	ErrNotFound      = errors.New("not found")
+	ErrNotFound      = errors.New("record not foundd")
 )

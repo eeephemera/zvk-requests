@@ -77,6 +77,7 @@ func ValidateToken(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), UserIDKey, int(idValue))
 		ctx = context.WithValue(ctx, RoleKey, role)
 		next.ServeHTTP(w, r.WithContext(ctx))
+		log.Println("Request Headers:", r.Header)
 	})
 }
 

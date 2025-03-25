@@ -46,8 +46,6 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Обратите внимание: поле Role теперь не обязательно.
-	// Можно убрать Role из структуры RegisterRequest, либо просто игнорировать его здесь.
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -243,4 +241,24 @@ func Me(w http.ResponseWriter, r *http.Request) {
 		"id":   userID,
 		"role": role,
 	})
+}
+func LogoutUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cookie := &http.Cookie{
+		Name:     "token",
+		Value:    "",
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+	}
+	http.SetCookie(w, cookie)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Logged out successfully"})
 }
