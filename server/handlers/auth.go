@@ -15,13 +15,13 @@ import (
 
 // DTO для запросов
 type RegisterRequest struct {
-	Email    string `json:"email"`
+	Login    string `json:"login"`
 	Password string `json:"password"`
 	Role     string `json:"role"`
 }
 
 type LoginRequest struct {
-	Email    string `json:"email"`
+	Login    string `json:"login"`
 	Password string `json:"password"`
 }
 
@@ -47,7 +47,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Email    string `json:"email"`
+		Login    string `json:"login"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -55,11 +55,12 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Валидация Email
-	if !utils.IsValidEmail(req.Email) {
-		http.Error(w, "Invalid email format", http.StatusBadRequest)
+	// Валидация логина
+	if len(req.Login) < 3 {
+		http.Error(w, "Логин должен содержать минимум 3 символа", http.StatusBadRequest)
 		return
 	}
+
 	// Валидация пароля
 	if err := utils.ValidatePassword(req.Password); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -87,19 +88,19 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	defer conn.Release()
 
 	query := `
-        INSERT INTO users (email, password, role, created_at) 
+        INSERT INTO users (login, password_hash, role, created_at) 
         VALUES ($1, $2, $3, $4) 
-        RETURNING id, email, role, created_at
+        RETURNING id, login, role, created_at
     `
 	var user models.User
 	err = conn.QueryRow(
 		r.Context(),
 		query,
-		req.Email,
+		req.Login,
 		hashedPassword,
 		role, // Всегда "Пользователь"
 		time.Now(),
-	).Scan(&user.ID, &user.Email, &user.Role, &user.CreatedAt)
+	).Scan(&user.ID, &user.Login, &user.Role, &user.CreatedAt)
 
 	if err != nil {
 		log.Printf("Database error: %v", err)
@@ -132,14 +133,14 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 
 	var user models.User
 	query := `
-        SELECT id, email, password, role, created_at 
+        SELECT id, login, password_hash, role, created_at 
         FROM users 
-        WHERE email = $1
+        WHERE login = $1
     `
-	err = conn.QueryRow(r.Context(), query, req.Email).Scan(
+	err = conn.QueryRow(r.Context(), query, req.Login).Scan(
 		&user.ID,
-		&user.Email,
-		&user.Password,
+		&user.Login,
+		&user.PasswordHash,
 		&user.Role,
 		&user.CreatedAt,
 	)
@@ -150,8 +151,8 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Проверка пароля
-	if err := utils.CheckPasswordHash(req.Password, user.Password); err != nil {
-		log.Printf("Password mismatch for user %s", user.Email)
+	if err := utils.CheckPasswordHash(req.Password, user.PasswordHash); err != nil {
+		log.Printf("Password mismatch for user %s", user.Login)
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -159,7 +160,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	// Генерация JWT
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":    user.ID,
-		"email": user.Email,
+		"login": user.Login,
 		"role":  user.Role,
 		"exp":   time.Now().Add(72 * time.Hour).Unix(),
 	})

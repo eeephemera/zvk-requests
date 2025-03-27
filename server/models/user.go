@@ -12,9 +12,9 @@ const (
 
 // User представляет пользователя системы
 type User struct {
-	ID        int       `json:"id"`
-	Email     string    `json:"email"`
-	Password  string    `json:"-"`
-	Role      UserRole  `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           int       `json:"id"`
+	Login        string    `json:"login"`
+	PasswordHash string    `json:"-"`
+	Role         UserRole  `json:"role"`
+	CreatedAt    time.Time `json:"created_at"`
 }

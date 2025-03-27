@@ -326,3 +326,219 @@ interface RequestData {
       };
     }
   }
+
+  /**
+   * Функция для скачивания файла заявки через интерфейс менеджера
+   */
+  export async function downloadRequestFile(requestId: number): Promise<{ success: boolean; blob?: Blob; filename?: string; error?: string }> {
+    try {
+      // Проверка сетевого соединения
+      if (typeof window !== 'undefined' && !navigator.onLine) {
+        return { 
+          success: false, 
+          error: "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова." 
+        };
+      }
+      
+      // Установка таймаута для запроса
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаута
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${requestId}/file`, {
+        credentials: "include",
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          return { success: false, error: "Не авторизован" };
+        }
+        
+        if (response.status === 404) {
+          return { success: false, error: "Файл не найден" };
+        }
+        
+        if (response.status >= 500) {
+          return { success: false, error: "Ошибка сервера. Пожалуйста, попробуйте позже." };
+        }
+        
+        return { success: false, error: `Ошибка загрузки файла: ${response.status}` };
+      }
+      
+      const blob = await response.blob();
+      
+      // Извлекаем имя файла из заголовков ответа
+      const contentDisposition = response.headers.get('content-disposition');
+      let filename = `file-${requestId}`;
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+      
+      return { success: true, blob, filename };
+    } catch (err: unknown) {
+      console.error("Ошибка при скачивании файла:", err);
+      
+      // Обработка ошибки таймаута
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return { 
+          success: false, 
+          error: "Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте позже." 
+        };
+      }
+      
+      // Обработка сетевых ошибок
+      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+        return { 
+          success: false, 
+          error: "Не удалось соединиться с сервером. Проверьте подключение к интернету." 
+        };
+      }
+      
+      return { 
+        success: false, 
+        error: err instanceof Error ? err.message : "Неизвестная ошибка при скачивании файла" 
+      };
+    }
+  }
+
+  /**
+   * Обновление статуса заявки менеджером
+   */
+  export async function updateRequestStatus(requestId: number, status: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (typeof window !== 'undefined' && !navigator.onLine) {
+        return { 
+          success: false, 
+          error: "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова." 
+        };
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${requestId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status }),
+        credentials: 'include',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          return { success: false, error: "Не авторизован" };
+        }
+        
+        if (response.status === 404) {
+          return { success: false, error: "Заявка не найдена" };
+        }
+        
+        if (response.status >= 500) {
+          return { success: false, error: "Ошибка сервера. Пожалуйста, попробуйте позже." };
+        }
+        
+        return { success: false, error: `Ошибка обновления статуса: ${response.status}` };
+      }
+      
+      return { success: true };
+    } catch (err: unknown) {
+      console.error("Ошибка при обновлении статуса заявки:", err);
+      
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return { 
+          success: false, 
+          error: "Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте позже." 
+        };
+      }
+      
+      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+        return { 
+          success: false, 
+          error: "Не удалось соединиться с сервером. Проверьте подключение к интернету." 
+        };
+      }
+      
+      return { 
+        success: false, 
+        error: err instanceof Error ? err.message : "Неизвестная ошибка при обновлении статуса" 
+      };
+    }
+  }
+
+  /**
+   * Удаление заявки менеджером
+   */
+  export async function deleteRequest(requestId: number): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (typeof window !== 'undefined' && !navigator.onLine) {
+        return { 
+          success: false, 
+          error: "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова." 
+        };
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${requestId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          return { success: false, error: "Не авторизован" };
+        }
+        
+        if (response.status === 404) {
+          return { success: false, error: "Заявка не найдена" };
+        }
+        
+        if (response.status === 409) {
+          return { success: false, error: "Невозможно удалить заявку, т.к. она связана с другими записями" };
+        }
+        
+        if (response.status >= 500) {
+          return { success: false, error: "Ошибка сервера. Пожалуйста, попробуйте позже." };
+        }
+        
+        return { success: false, error: `Ошибка удаления заявки: ${response.status}` };
+      }
+      
+      return { success: true };
+    } catch (err: unknown) {
+      console.error("Ошибка при удалении заявки:", err);
+      
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return { 
+          success: false, 
+          error: "Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте позже." 
+        };
+      }
+      
+      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+        return { 
+          success: false, 
+          error: "Не удалось соединиться с сервером. Проверьте подключение к интернету." 
+        };
+      }
+      
+      return { 
+        success: false, 
+        error: err instanceof Error ? err.message : "Неизвестная ошибка при удалении заявки" 
+      };
+    }
+  }

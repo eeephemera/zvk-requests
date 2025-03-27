@@ -72,6 +72,7 @@ func main() {
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie")
+			w.Header().Set("Access-Control-Expose-Headers", "Set-Cookie")
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
@@ -95,6 +96,7 @@ func main() {
 	userRouter.HandleFunc("", requestHandler.GetRequestsByUserHandler).Methods("GET")
 	userRouter.HandleFunc("/{id}", requestHandler.UpdateRequestHandler).Methods("PUT")
 	userRouter.HandleFunc("/{id}", requestHandler.DeleteRequestHandler).Methods("DELETE")
+	authRouter.HandleFunc("/me", handlers.Me).Methods("GET", "OPTIONS")
 
 	// --- Маршруты для менеджеров (Менеджер) ---
 	managerRouter := authRouter.PathPrefix("/manager/requests").Subrouter()

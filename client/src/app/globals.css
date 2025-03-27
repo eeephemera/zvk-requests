@@ -3,28 +3,204 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Discord 2025 Color Palette */
+  --discord-bg: #1e1f22;
+  --discord-darker: #141517;
+  --discord-dark: #2b2d31;
+  --discord-medium: #303338;
+  --discord-light: #3c3f45;
+  --discord-lightest: #4e5058;
+  
+  --discord-text: #f2f3f5;
+  --discord-text-muted: #b5bac1;
+  --discord-text-secondary: #d6d9dc;
+  
+  --discord-accent: #5865f2;
+  --discord-accent-dark: #4752c4;
+  --discord-accent-light: #7983f5;
+  --discord-accent-super-light: #e2e5ff;
+  
+  --discord-success: #24a65c;
+  --discord-warning: #f0b132;
+  --discord-danger: #eb4754;
+  --discord-info: #00a8fc;
+  
+  /* Glass Effect Values */
+  --glass-opacity: 0.7;
+  --glass-blur: 15px;
+  --glass-border: 1px solid rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  
+  /* Animation Timings */
+  --anim-fast: 0.15s;
+  --anim-medium: 0.25s;
+  --anim-slow: 0.4s;
+  
+  /* Z-index Layers */
+  --z-modal: 100;
+  --z-dropdown: 50;
+  --z-tooltip: 75;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #ffffff;
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Base Styles */
+body {
+  background: var(--discord-bg);
+  color: var(--discord-text);
+  font-family: 'Inter', 'Roboto', system-ui, sans-serif;
+  transition: background-color 0.3s ease;
+}
+
+@layer components {
+  /* Modern Card Styles */
+  .discord-card {
+    @apply bg-opacity-90 backdrop-blur-sm rounded-xl shadow-lg;
+    background-color: var(--discord-dark);
+    transition: transform var(--anim-medium) ease, box-shadow var(--anim-medium) ease;
+  }
+  
+  .discord-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  }
+  
+  /* Button Styles */
+  .discord-btn {
+    @apply px-4 py-2 rounded-md font-medium transition-all duration-200 flex items-center justify-center;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .discord-btn-primary {
+    @apply discord-btn;
+    background-color: var(--discord-accent);
+    color: white;
+  }
+  
+  .discord-btn-primary:hover {
+    background-color: var(--discord-accent-dark);
+  }
+  
+  .discord-btn-secondary {
+    @apply discord-btn;
+    background-color: var(--discord-medium);
+    color: var(--discord-text);
+  }
+  
+  .discord-btn-secondary:hover {
+    background-color: var(--discord-light);
+  }
+  
+  .discord-btn-danger {
+    @apply discord-btn;
+    background-color: var(--discord-danger);
+    color: white;
+  }
+  
+  .discord-btn-danger:hover {
+    background-color: #d93645;
+  }
+  
+  /* Input Styles */
+  .discord-input {
+    @apply px-3 py-2 rounded-md border focus:outline-none focus:ring-2 transition-all duration-200;
+    background-color: var(--discord-darker);
+    border-color: var(--discord-lightest);
+    color: var(--discord-text);
+  }
+  
+  .discord-input:focus {
+    border-color: var(--discord-accent);
+    box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.25);
+  }
+  
+  /* Table Styles */
+  .discord-table {
+    @apply w-full rounded-lg overflow-hidden;
+    background-color: var(--discord-dark);
+    border: 1px solid var(--discord-light);
+  }
+  
+  .discord-table-header {
+    @apply text-left text-sm font-medium text-discord-text-muted uppercase tracking-wider;
+    background-color: var(--discord-medium);
+  }
+  
+  .discord-table-row {
+    @apply border-b transition-colors duration-200;
+    border-color: var(--discord-light);
+  }
+  
+  .discord-table-row:hover {
+    background-color: var(--discord-medium);
+  }
+  
+  /* Badge Styles */
+  .discord-badge {
+    @apply px-2 py-1 rounded-full text-xs font-semibold;
+  }
+  
+  /* Status Badges */
+  .discord-status-new {
+    @apply discord-badge;
+    background-color: var(--discord-info);
+    color: white;
+  }
+  
+  .discord-status-pending {
+    @apply discord-badge;
+    background-color: var(--discord-warning);
+    color: white;
+  }
+  
+  .discord-status-completed {
+    @apply discord-badge;
+    background-color: var(--discord-success);
+    color: white;
+  }
+  
+  .discord-status-rejected {
+    @apply discord-badge;
+    background-color: var(--discord-danger);
+    color: white;
+  }
+  
+  /* Glass Card Effect */
+  .discord-glass {
+    @apply rounded-xl backdrop-blur-md;
+    background-color: rgba(46, 48, 53, var(--glass-opacity));
+    border: var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+  
+  /* Sidebar Styles */
+  .discord-sidebar {
+    @apply fixed top-0 left-0 h-full transition-transform duration-300 ease-in-out z-30;
+    background-color: var(--discord-darker);
+    width: 260px;
+  }
+  
+  /* Navigation Styles */
+  .discord-nav-item {
+    @apply flex items-center px-4 py-2 my-1 rounded-md text-discord-text-muted font-medium transition-colors duration-200;
+  }
+  
+  .discord-nav-item:hover {
+    background-color: var(--discord-medium);
+    color: var(--discord-text);
+  }
+  
+  .discord-nav-item-active {
+    @apply discord-nav-item;
+    background-color: var(--discord-medium);
+    color: var(--discord-text);
   }
 }
 
-body {
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-/* Анимации */
+/* Animation Keyframes */
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.98);
   }
   to {
     opacity: 1;
@@ -33,16 +209,59 @@ body {
 }
 
 @keyframes slideUp {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { 
+    transform: translateY(20px);
+    opacity: 0; 
+  }
+  to { 
+    transform: translateY(0);
+    opacity: 1; 
+  }
 }
 
+@keyframes pulse {
+  0% { 
+    box-shadow: 0 0 0 0 rgba(88, 101, 242, 0.7);
+  }
+  70% { 
+    box-shadow: 0 0 0 10px rgba(88, 101, 242, 0);
+  }
+  100% { 
+    box-shadow: 0 0 0 0 rgba(88, 101, 242, 0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Animation Classes */
 .animate-fadeIn {
   animation: fadeIn 0.2s ease-out forwards;
 }
 
 .animate-slideUp {
-  animation: slideUp 0.5s ease-out;
+  animation: slideUp 0.3s ease-out;
+}
+
+.animate-pulse {
+  animation: pulse 2s infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
 }
 
 .delay-100 {
@@ -53,30 +272,82 @@ body {
   animation-delay: 200ms;
 }
 
-/* Стили для тултипов */
-.tooltip {
-  position: relative;
-  display: inline-block;
+.delay-300 {
+  animation-delay: 300ms;
 }
 
-.tooltip .tooltiptext {
-  visibility: hidden;
-  width: 120px;
-  background-color: #555;
-  color: #fff;
-  text-align: center;
-  border-radius: 6px;
-  padding: 5px 0;
-  position: absolute;
-  z-index: 1;
-  bottom: 125%;
+/* Tooltip with modern style */
+.discord-tooltip {
+  @apply relative inline-block;
+}
+
+.discord-tooltip-content {
+  @apply absolute invisible opacity-0 p-2 text-sm font-medium rounded-md transition-all duration-200 z-50 whitespace-nowrap;
+  background-color: var(--discord-dark);
+  color: var(--discord-text);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  bottom: calc(100% + 5px);
   left: 50%;
-  margin-left: -60px;
-  opacity: 0;
-  transition: opacity 0.3s;
+  transform: translateX(-50%) scale(0.95);
 }
 
-.tooltip:hover .tooltiptext {
-  visibility: visible;
-  opacity: 1;
+.discord-tooltip:hover .discord-tooltip-content {
+  @apply visible opacity-100;
+  transform: translateX(-50%) scale(1);
+}
+
+/* Modern Modal/Dialog */
+.discord-modal-backdrop {
+  @apply fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm;
+  background-color: rgba(0, 0, 0, 0.5);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.discord-modal {
+  @apply relative rounded-xl overflow-hidden max-w-3xl w-full max-h-[85vh] flex flex-col;
+  background-color: var(--discord-dark);
+  border: 1px solid var(--discord-light);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  animation: fadeIn 0.2s ease-out, slideUp 0.3s ease-out;
+}
+
+.discord-modal-header {
+  @apply flex justify-between items-center p-4 border-b;
+  background-color: var(--discord-medium);
+  border-color: var(--discord-light);
+}
+
+.discord-modal-body {
+  @apply p-6 overflow-y-auto;
+}
+
+.discord-modal-footer {
+  @apply p-4 border-t flex justify-end space-x-3;
+  background-color: var(--discord-medium);
+  border-color: var(--discord-light);
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--discord-darker);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--discord-lightest);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #5d616b;
+}
+
+/* Loading Skeleton */
+.discord-skeleton {
+  @apply rounded animate-shimmer;
+  background-color: var(--discord-medium);
 }

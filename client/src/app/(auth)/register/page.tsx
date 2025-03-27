@@ -3,25 +3,39 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useForm, SubmitHandler } from "react-hook-form";
+
+type FormInputs = {
+  login: string;
+  password: string;
+  confirmPassword: string;
+};
 
 const getFriendlyErrorMessage = (error: string): string => {
-  if (error.includes("Invalid email format")) return "Неверный формат email";
-  if (error.includes("Registration failed")) return "Ошибка регистрации. Проверьте введённые данные.";
   if (error.includes("Invalid request body")) return "Неверно сформирован запрос";
+  if (error.includes("duplicate key")) return "Пользователь с таким логином уже существует";
+  if (error.includes("Registration failed")) return "Ошибка регистрации. Проверьте введённые данные.";
   return "Что-то пошло не так. Пожалуйста, попробуйте ещё раз.";
 };
 
 export default function RegisterPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const { register, handleSubmit, watch, formState: { errors } } = useForm<FormInputs>();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const password = watch("password");
+
+  const onSubmit: SubmitHandler<FormInputs> = async (data) => {
+    if (data.password !== data.confirmPassword) {
+      setError("Пароли не совпадают");
+      return;
+    }
+
     setError("");
     setSuccess("");
+    setIsLoading(true);
 
     try {
       const res = await fetch(
@@ -30,7 +44,10 @@ export default function RegisterPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ 
+            login: data.login,
+            password: data.password 
+          }),
         }
       );
 
@@ -46,9 +63,9 @@ export default function RegisterPage() {
         throw new Error(message);
       }
 
-      const data = await res.json();
-      console.log("Registered:", data);
-      setSuccess("Регистрация прошла успешно. Теперь вы можете войти.");
+      const responseData = await res.json();
+      console.log("Registered:", responseData);
+      setSuccess("Регистрация прошла успешно. Перенаправление на страницу входа...");
       setTimeout(() => router.push("/login"), 2000);
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -56,54 +73,125 @@ export default function RegisterPage() {
       } else {
         setError("Неизвестная ошибка");
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center px-4">
-      <div className="max-w-md w-full bg-gray-800 p-8 rounded-lg shadow-lg">
-        <h1 className="text-3xl font-bold text-white mb-6 text-center">Регистрация</h1>
-        <form onSubmit={handleRegister} className="space-y-4">
-          {error && <p className="text-red-400 text-center">{error}</p>}
-          {success && <p className="text-green-400 text-center">{success}</p>}
-          <div>
-            <label htmlFor="email" className="block text-gray-300 mb-1">
-              Email
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: 'var(--discord-bg)' }}>
+      <div className="discord-card w-full max-w-md p-6 animate-fadeIn">
+        <h1 className="text-2xl font-bold text-discord-text flex items-center mb-6">
+          <span className="bg-discord-accent h-8 w-1 rounded-full mr-3"></span>
+          Регистрация
+        </h1>
+        
+        {/* Сообщения */}
+        {(error || success) && (
+          <div className="mb-5 text-center animate-fadeIn">
+            {error && (
+              <div className="p-3 bg-discord-danger bg-opacity-20 rounded-lg border border-discord-danger border-opacity-30">
+                <p className="text-discord-danger">{error}</p>
+              </div>
+            )}
+            {success && (
+              <div className="p-3 bg-discord-success bg-opacity-20 rounded-lg border border-discord-success border-opacity-30">
+                <p className="text-discord-success">{success}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          <div className="animate-slideUp delay-100">
+            <label htmlFor="login" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+              Логин <span className="text-discord-danger">*</span>
             </label>
             <input
-              id="email"
-              type="email"
-              placeholder="Введите email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
+              id="login"
+              type="text"
+              placeholder="Введите логин"
+              className={`discord-input w-full ${errors.login ? 'border-discord-danger' : ''}`}
+              {...register("login", { 
+                required: "Логин обязателен", 
+                minLength: {
+                  value: 3,
+                  message: "Логин должен содержать минимум 3 символа"
+                }
+              })}
             />
+            {errors.login && <p className="text-discord-danger text-xs mt-1">{errors.login.message}</p>}
           </div>
-          <div>
-            <label htmlFor="password" className="block text-gray-300 mb-1">
-              Пароль
+
+          <div className="animate-slideUp delay-200">
+            <label htmlFor="password" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+              Пароль <span className="text-discord-danger">*</span>
             </label>
             <input
               id="password"
               type="password"
               placeholder="Введите пароль"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full p-3 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
+              className={`discord-input w-full ${errors.password ? 'border-discord-danger' : ''}`}
+              {...register("password", { 
+                required: "Пароль обязателен", 
+                minLength: {
+                  value: 6,
+                  message: "Пароль должен содержать минимум 6 символов"
+                }
+              })}
             />
+            {errors.password && <p className="text-discord-danger text-xs mt-1">{errors.password.message}</p>}
           </div>
+
+          <div className="animate-slideUp delay-300">
+            <label htmlFor="confirmPassword" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+              Подтверждение пароля <span className="text-discord-danger">*</span>
+            </label>
+            <input
+              id="confirmPassword"
+              type="password"
+              placeholder="Повторите пароль"
+              className={`discord-input w-full ${errors.confirmPassword ? 'border-discord-danger' : ''}`}
+              {...register("confirmPassword", { 
+                required: "Подтверждение пароля обязательно",
+                validate: value => value === password || "Пароли не совпадают"
+              })}
+            />
+            {errors.confirmPassword && <p className="text-discord-danger text-xs mt-1">{errors.confirmPassword.message}</p>}
+          </div>
+
+          {/* Индикатор загрузки */}
+          {isLoading && (
+            <div className="w-full bg-discord-dark rounded-full h-2 overflow-hidden animate-fadeIn">
+              <div className="h-full bg-discord-accent rounded-full animate-pulse" style={{ width: '100%' }}></div>
+            </div>
+          )}
+
           <button
             type="submit"
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded text-white font-semibold transition-colors"
+            disabled={isLoading}
+            className={`discord-btn-primary w-full py-3 ${isLoading ? 'opacity-80 cursor-not-allowed' : ''}`}
           >
-            Зарегистрироваться
+            {isLoading ? (
+              <>
+                <span className="opacity-0">Зарегистрироваться</span>
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <svg className="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Регистрация...</span>
+                </span>
+              </>
+            ) : (
+              "Зарегистрироваться"
+            )}
           </button>
         </form>
-        <p className="mt-4 text-center">
+
+        <p className="mt-5 text-center text-discord-text-muted">
           Уже зарегистрированы?{" "}
-          <Link href="/login" className="text-blue-400 hover:underline">
+          <Link href="/login" className="text-discord-accent hover:underline">
             Войти
           </Link>
         </p>

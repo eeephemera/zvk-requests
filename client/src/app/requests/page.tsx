@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect, useRef } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
 import { submitRequest, saveDraft, loadDraft } from "../../services/requestService";
@@ -143,15 +144,16 @@ export default function RequestsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-6">
-      <div className="w-full max-w-4xl bg-gray-800 rounded-xl shadow-lg p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h1 className="text-2xl font-bold text-white">
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: 'var(--discord-bg)' }}>
+      <div className="discord-card w-full max-w-4xl p-6 animate-fadeIn">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold text-discord-text flex items-center">
+            <span className="bg-discord-accent h-8 w-1 rounded-full mr-3"></span>
             Регистрация проекта
           </h1>
           <Link 
             href="/my-requests" 
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+            className="discord-btn-primary"
           >
             Мои заявки
           </Link>
@@ -159,116 +161,153 @@ export default function RequestsPage() {
 
         {/* Сообщения */}
         {(error || success) && (
-          <div className="mb-4 text-center">
-            {error && <p className="text-red-400">{error}</p>}
-            {success && <p className="text-green-400">{success}</p>}
+          <div className="mb-5 text-center animate-fadeIn">
+            {error && (
+              <div className="p-3 bg-discord-danger bg-opacity-20 rounded-lg border border-discord-danger border-opacity-30">
+                <p className="text-discord-danger">{error}</p>
+              </div>
+            )}
+            {success && (
+              <div className="p-3 bg-discord-success bg-opacity-20 rounded-lg border border-discord-success border-opacity-30">
+                <p className="text-discord-success">{success}</p>
+              </div>
+            )}
           </div>
         )}
 
         <form 
           ref={formRef} 
-          className="space-y-4" 
+          className="space-y-5" 
           onSubmit={handleSubmit(onSubmit)}
           onChange={handleFormChange}
         >
           {/* Основная сетка */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Левая колонка */}
-            <div className="space-y-4">
+            <div className="space-y-5">
               {/* ИНН */}
-              <div>
-                <label htmlFor="inn" className="block text-gray-300 text-sm mb-1">
-                  ИНН <span className="text-red-400">*</span>
+              <div className="animate-slideUp delay-100">
+                <label htmlFor="inn" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                  ИНН <span className="text-discord-danger">*</span>
                 </label>
                 <input
                   id="inn"
                   type="text"
                   placeholder="Введите ИНН"
-                  className={`w-full p-2 rounded bg-gray-700 text-white border ${errors.inn ? 'border-red-500' : 'border-gray-600'} focus:outline-none focus:ring-2 focus:ring-green-500 text-sm`}
+                  className={`discord-input w-full ${errors.inn ? 'border-discord-danger' : ''}`}
                   {...register("inn", { required: "ИНН обязателен", pattern: {
                     value: /^\d{10}$|^\d{12}$/,
                     message: "ИНН должен содержать 10 или 12 цифр"
                   }})}
                 />
-                {errors.inn && <p className="text-red-400 text-xs mt-1">{errors.inn.message}</p>}
+                {errors.inn && <p className="text-discord-danger text-xs mt-1">{errors.inn.message}</p>}
               </div>
 
               {/* Наименование организации */}
-              <div>
-                <label htmlFor="organizationName" className="block text-gray-300 text-sm mb-1">
-                  Наименование организации <span className="text-red-400">*</span>
+              <div className="animate-slideUp delay-200">
+                <label htmlFor="organizationName" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                  Наименование организации <span className="text-discord-danger">*</span>
                 </label>
                 <input
                   id="organizationName"
                   type="text"
                   placeholder="Название организации"
-                  className={`w-full p-2 rounded bg-gray-700 text-white border ${errors.organizationName ? 'border-red-500' : 'border-gray-600'} focus:outline-none focus:ring-2 focus:ring-green-500 text-sm`}
+                  className={`discord-input w-full ${errors.organizationName ? 'border-discord-danger' : ''}`}
                   {...register("organizationName", { required: "Название организации обязательно" })}
                 />
-                {errors.organizationName && <p className="text-red-400 text-xs mt-1">{errors.organizationName.message}</p>}
+                {errors.organizationName && <p className="text-discord-danger text-xs mt-1">{errors.organizationName.message}</p>}
               </div>
 
               {/* Прикрепить ТЗ */}
-              <div>
-                <label htmlFor="tzFile" className="block text-gray-300 text-sm mb-1">
-                  Прикрепить ТЗ <span className="text-red-400">*</span>
+              <div className="animate-slideUp delay-300">
+                <label htmlFor="tzFile" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                  Прикрепить ТЗ <span className="text-discord-danger">*</span>
                 </label>
-                <input
-                  id="tzFile"
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
-                  onChange={handleFileChange}
-                  className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-                  required
-                />
+                <div className="border border-dashed border-discord-lightest rounded-lg p-4 bg-discord-darker hover:bg-discord-dark transition-colors">
+                  <input
+                    id="tzFile"
+                    type="file"
+                    ref={fileInputRef}
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+                    onChange={handleFileChange}
+                    className="hidden"
+                    required
+                  />
+                  <label htmlFor="tzFile" className="cursor-pointer flex flex-col items-center text-discord-text-muted">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 mb-2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                    </svg>
+                    <span className="text-sm mb-1">Перетащите файл сюда или нажмите, чтобы выбрать</span>
+                    <span className="text-xs">PDF, DOC, DOCX, XLS, XLSX, JPG, JPEG, PNG (макс. 10МБ)</span>
+                  </label>
+                </div>
                 
                 {/* Превью файла */}
                 {filePreview && (
-                  <div className="mt-2 p-2 bg-gray-700 rounded flex items-center">
+                  <div className="mt-3 p-3 rounded-lg flex items-center bg-discord-medium animate-fadeIn">
                     {filePreview.startsWith('data:image') ? (
                       <Image 
                         src={filePreview} 
                         alt="Превью" 
                         width={64}
                         height={64}
-                        className="h-16 w-auto object-contain mr-2" 
+                        className="h-16 w-auto object-contain mr-3 rounded-md" 
                       />
                     ) : (
-                      <div className="h-12 w-12 bg-gray-600 rounded flex items-center justify-center mr-2">
+                      <div className="h-12 w-12 bg-discord-dark rounded-md flex items-center justify-center mr-3 text-discord-accent">
                         <span className="text-xl">{filePreview}</span>
                       </div>
                     )}
-                    <div className="text-sm text-gray-300 truncate">{fileName}</div>
+                    <div className="flex-1">
+                      <div className="text-sm text-discord-text truncate">{fileName}</div>
+                      <div className="text-xs text-discord-text-muted mt-1">
+                        Добавлен {new Date().toLocaleTimeString()}
+                      </div>
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setTzFile(null);
+                        setFilePreview(null);
+                        setFileName(null);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                      className="text-discord-text-muted hover:text-discord-danger transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   </div>
                 )}
               </div>
             </div>
 
             {/* Правая колонка */}
-            <div className="space-y-4">
+            <div className="space-y-5">
               {/* Дата реализации */}
-              <div>
-                <label htmlFor="implementationDate" className="block text-gray-300 text-sm mb-1">
-                  Дата реализации <span className="text-red-400">*</span>
+              <div className="animate-slideUp delay-100">
+                <label htmlFor="implementationDate" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                  Дата реализации <span className="text-discord-danger">*</span>
                 </label>
                 <input
                   id="implementationDate"
                   type="date"
-                  className={`w-full p-2 rounded bg-gray-700 text-white border ${errors.implementationDate ? 'border-red-500' : 'border-gray-600'} focus:outline-none focus:ring-2 focus:ring-green-500 text-sm`}
+                  className={`discord-input w-full ${errors.implementationDate ? 'border-discord-danger' : ''}`}
                   {...register("implementationDate", { required: "Дата реализации обязательна" })}
                 />
-                {errors.implementationDate && <p className="text-red-400 text-xs mt-1">{errors.implementationDate.message}</p>}
+                {errors.implementationDate && <p className="text-discord-danger text-xs mt-1">{errors.implementationDate.message}</p>}
               </div>
 
               {/* Какой ФЗ? */}
-              <div>
-                <label htmlFor="fzType" className="block text-gray-300 text-sm mb-1">
+              <div className="animate-slideUp delay-200">
+                <label htmlFor="fzType" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
                   Какой ФЗ?
                 </label>
                 <select
                   id="fzType"
-                  className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                  className="discord-input w-full appearance-none pr-8"
+                  style={{backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23686b74' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")", backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em"}}
                   {...register("fzType")}
                 >
                   <option value="223">223 ФЗ</option>
@@ -277,13 +316,14 @@ export default function RequestsPage() {
               </div>
 
               {/* Реестр/Нереестр */}
-              <div>
-                <label htmlFor="registryType" className="block text-gray-300 text-sm mb-1">
+              <div className="animate-slideUp delay-300">
+                <label htmlFor="registryType" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
                   Реестр/Нереестр
                 </label>
                 <select
                   id="registryType"
-                  className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                  className="discord-input w-full appearance-none pr-8"
+                  style={{backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23686b74' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")", backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em"}}
                   {...register("registryType")}
                 >
                   <option value="registry">Реестр</option>
@@ -294,47 +334,49 @@ export default function RequestsPage() {
           </div>
 
           {/* Комментарий */}
-          <div>
-            <label htmlFor="comment" className="block text-gray-300 text-sm mb-1">
+          <div className="animate-slideUp delay-300">
+            <label htmlFor="comment" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
               Комментарий
             </label>
             <textarea
               id="comment"
-              placeholder="Введите комментарий"
-              className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
-              rows={3}
+              placeholder="Введите комментарий к заявке..."
+              className="discord-input w-full resize-none"
+              rows={4}
               {...register("comment")}
             />
           </div>
 
           {/* Индикатор прогресса */}
           {isLoading && (
-            <div className="w-full bg-gray-700 rounded-full h-2.5 mb-2">
+            <div className="w-full bg-discord-dark rounded-full h-2 overflow-hidden animate-fadeIn">
               <div 
-                className="bg-green-600 h-2.5 rounded-full transition-all duration-300" 
+                className="h-full bg-discord-accent transition-all duration-300 rounded-full relative"
                 style={{ width: `${loadingProgress}%` }}
-              ></div>
+              >
+                <div className="absolute inset-0 overflow-hidden">
+                  <div className="animate-shimmer h-full w-full"></div>
+                </div>
+              </div>
             </div>
           )}
 
           {/* Кнопка */}
-          <div>
+          <div className="pt-2">
             <button
               type="submit"
               disabled={isLoading}
-              className={`w-full py-3 rounded text-white font-semibold transition-colors ${
-                isLoading ? "bg-green-800 relative" : "bg-green-600 hover:bg-green-700"
-              }`}
+              className={`discord-btn-primary w-full py-3 ${isLoading ? 'opacity-80 cursor-not-allowed' : ''}`}
             >
               {isLoading ? (
                 <>
                   <span className="opacity-0">Зарегистрировать проект</span>
                   <span className="absolute inset-0 flex items-center justify-center">
-                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg className="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    <span className="ml-2">Отправка...</span>
+                    <span>Отправка...</span>
                   </span>
                 </>
               ) : (
