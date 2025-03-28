@@ -3,6 +3,8 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"unicode"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -28,7 +30,52 @@ func CheckPasswordHash(password, hash string) error {
 
 func ValidatePassword(password string) error {
 	if len(password) < 8 {
-		return errors.New("password must be at least 8 characters")
+		return errors.New("пароль должен содержать не менее 8 символов")
 	}
+
+	hasNumber := false
+	hasUpper := false
+	hasSpecial := false
+
+	for _, char := range password {
+		switch {
+		case unicode.IsDigit(char):
+			hasNumber = true
+		case unicode.IsUpper(char):
+			hasUpper = true
+		case unicode.IsPunct(char) || unicode.IsSymbol(char):
+			hasSpecial = true
+		}
+	}
+
+	if !hasNumber {
+		return errors.New("пароль должен содержать хотя бы одну цифру")
+	}
+	if !hasUpper {
+		return errors.New("пароль должен содержать хотя бы одну заглавную букву")
+	}
+	if !hasSpecial {
+		return errors.New("пароль должен содержать хотя бы один специальный символ")
+	}
+
 	return nil
+}
+
+func CSRFProtection(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Пропускаем GET, HEAD, OPTIONS
+		if r.Method == "GET" || r.Method == "HEAD" || r.Method == "OPTIONS" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Проверяем CSRF-токен в заголовке
+		csrfToken := r.Header.Get("X-CSRF-Token")
+		if csrfToken == "" {
+			http.Error(w, "Invalid CSRF token", http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

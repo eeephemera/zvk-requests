@@ -104,8 +104,8 @@ func main() {
 	managerRouter.HandleFunc("", requestHandler.GetAllRequestsHandler).Methods("GET")
 	managerRouter.HandleFunc("/{id}", requestHandler.UpdateRequestByManagerHandler).Methods("PUT")
 	managerRouter.HandleFunc("/{id}", requestHandler.DeleteRequestByManagerHandler).Methods("DELETE")
-	managerRouter.HandleFunc("/{id}/tz_file", requestHandler.DownloadTZFileHandler).Methods("GET")
-	managerRouter.HandleFunc("/{id}", requestHandler.GetRequestByIDHandler).Methods("GET") // Исправлено: managerRouter вместо managerAPI
+	managerRouter.HandleFunc("/{id}/file", requestHandler.DownloadTZFileHandler).Methods("GET")
+	managerRouter.HandleFunc("/{id}", requestHandler.GetRequestByIDHandler).Methods("GET")
 
 	// Создаем HTTP сервер
 	server := &http.Server{

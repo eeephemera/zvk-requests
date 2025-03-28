@@ -238,8 +238,41 @@ func (h *RequestHandler) DownloadTZFileHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"tz_file_%d\"", id))
+	// Определяем тип файла по его содержимому
+	fileType := http.DetectContentType(req.TZFile)
+
+	// Устанавливаем имя файла с расширением в зависимости от типа
+	filename := fmt.Sprintf("tz_file_%d", id)
+
+	// Добавляем расширение в зависимости от типа файла
+	switch fileType {
+	case "application/pdf":
+		filename += ".pdf"
+	case "image/jpeg":
+		filename += ".jpg"
+	case "image/png":
+		filename += ".png"
+	case "application/msword":
+		filename += ".doc"
+	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		filename += ".docx"
+	case "application/vnd.ms-excel":
+		filename += ".xls"
+	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		filename += ".xlsx"
+	default:
+		filename += ".bin" // Бинарный файл по умолчанию
+	}
+
+	// Устанавливаем заголовки для скачивания
+	w.Header().Set("Content-Type", fileType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(req.TZFile)))
+
+	// Логируем информацию о скачивании
+	log.Printf("Downloading file for request ID=%d, type=%s, filename=%s", id, fileType, filename)
+
+	// Отправляем файл
 	w.Write(req.TZFile)
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
 
 type AuthContextType = {
   isAuthenticated: boolean;
@@ -29,13 +29,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   // Централизованная функция сброса состояния авторизации
-  const resetAuthState = () => {
+  const resetAuthState = useCallback(() => {
     setIsAuthenticated(false);
     setUserRole(null);
     setUserId(null);
-  };
+  }, []);
 
-  const checkAuth = async () => {
+  // Используем useCallback для мемоизации функции checkAuth
+  const checkAuth = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/me`, {
@@ -56,9 +57,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [resetAuthState]);
 
-  const logout = async () => {
+  // Также оборачиваем logout в useCallback
+  const logout = useCallback(async () => {
     try {
       await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/logout`, {
         method: "POST",
@@ -69,11 +71,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       resetAuthState();
     }
-  };
+  }, [resetAuthState]);
 
+  // Теперь указываем checkAuth в массиве зависимостей
   useEffect(() => {
     checkAuth();
-  }, []);
+  }, [checkAuth]);
 
   return (
     <AuthContext.Provider
