@@ -1,58 +1,69 @@
 "use client";
 
-import { useEffect, ReactNode } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/context/AuthContext";
+import { useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
+import { useAuth } from '../context/AuthContext';
 import AccessDenied from "./AccessDenied";
 import { getHomepageForRole } from "@/utils/navigation";
 
 type ProtectedRouteProps = {
-  children: ReactNode;
-  allowedRoles: string[];
+  children: React.ReactNode;
+  allowedRoles?: string[];
   redirectIfNotAllowed?: boolean;
+  isPublicPage?: boolean;
 };
 
-export default function ProtectedRoute({
+const ProtectedRoute = ({
   children,
-  allowedRoles,
-  redirectIfNotAllowed = false,
-}: ProtectedRouteProps) {
-  const { loading, isAuthenticated, userRole } = useAuth();
+  allowedRoles = [],
+  redirectIfNotAllowed = true,
+  isPublicPage = false,
+}: ProtectedRouteProps) => {
+  const { isAuthenticated, userRole, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    if (!loading) {
-      if (!isAuthenticated) {
-        router.push("/login");
-      } else if (
-        redirectIfNotAllowed &&
-        userRole &&
-        !allowedRoles.includes(userRole)
-      ) {
-        // Перенаправление на домашнюю страницу в зависимости от роли
-        router.push(getHomepageForRole(userRole));
+    if (loading) return;
+
+    if (isPublicPage) return;
+
+    if (!isAuthenticated) {
+      router.replace('/login');
+      return;
+    }
+
+    if (isAuthenticated) {
+      if (isPublicPage) {
+        const userHomepage = getHomepageForRole(userRole);
+        router.replace(userHomepage);
+        return;
+      }
+
+      if (allowedRoles.length > 0 && userRole) {
+        if (!allowedRoles.includes(userRole)) {
+          if (redirectIfNotAllowed) {
+            const userHomepage = getHomepageForRole(userRole);
+            router.replace(userHomepage);
+          }
+        }
       }
     }
-  }, [loading, isAuthenticated, userRole, router, allowedRoles, redirectIfNotAllowed]);
 
-  // Показываем загрузку
+  }, [isAuthenticated, userRole, loading, router, allowedRoles, redirectIfNotAllowed, isPublicPage, pathname]);
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--discord-bg)' }}>
-        <div className="animate-spin w-12 h-12 border-4 border-discord-accent rounded-full border-t-transparent"></div>
-      </div>
-    );
+    return <div>Loading...</div>;
   }
 
-  // Проверяем авторизацию
-  if (!isAuthenticated) {
-    return null; // Будет редирект на страницу логина
+  if (isPublicPage && !isAuthenticated) {
+    return <>{children}</>;
   }
 
-  // Проверяем права доступа
-  if (userRole && !allowedRoles.includes(userRole)) {
-    return redirectIfNotAllowed ? null : <AccessDenied />;
+  if (!isPublicPage && isAuthenticated && (allowedRoles.length === 0 || (userRole && allowedRoles.includes(userRole)))) {
+    return <>{children}</>;
   }
 
-  return <>{children}</>;
-} 
+  return null;
+};
+
+export default ProtectedRoute; 

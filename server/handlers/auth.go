@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -26,17 +27,35 @@ type LoginRequest struct {
 }
 
 // setTokenCookie устанавливает JWT-токен в HttpOnly cookie с указанной политикой SameSite.
-func setTokenCookie(w http.ResponseWriter, tokenString string, sameSite http.SameSite) {
+func setTokenCookie(w http.ResponseWriter, tokenString string) {
 	cookie := &http.Cookie{
 		Name:     "token",
 		Value:    tokenString,
 		Expires:  time.Now().Add(72 * time.Hour),
 		HttpOnly: true,
-		Secure:   true, // Для разработки по HTTP
-		// Domain можно не указывать для локальной разработки
-		SameSite: sameSite,
+		Secure:   true, // Оставляем Secure=true, т.к. SameSite=None требует его, а Lax/Strict - рекомендуют
+		Path:     "/",  // Явно указываем Path
+		// Domain можно не указывать для localhost
+		SameSite: http.SameSiteLaxMode, // Всегда используем Lax для лучшей совместимости на localhost
 	}
 	http.SetCookie(w, cookie)
+}
+
+// --- Предполагаемые интерфейсы ---
+// (Вставьте сюда или в отдельный файл ваши реальные интерфейсы, если они есть)
+type UserRepositoryInterface interface {
+	GetUserByID(ctx context.Context, id int) (*models.User, error)
+}
+
+type PartnerRepositoryInterface interface {
+	GetPartnerByID(ctx context.Context, id int) (*models.Partner, error)
+}
+
+// --- Предполагаемая структура обработчика ---
+// (Замените на вашу реальную структуру)
+type AuthHandler struct {
+	UserRepo    UserRepositoryInterface
+	PartnerRepo PartnerRepositoryInterface
 }
 
 // RegisterUser обрабатывает регистрацию новых пользователей.
@@ -75,8 +94,8 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Устанавливаем роль пользователя принудительно
-	role := string(models.RoleUser)
+	// Устанавливаем роль пользователя принудительно как строку
+	role := models.RoleUser // Теперь это строка "USER"
 
 	// Сохранение в БД
 	conn, err := db.GetDBConnection(r.Context())
@@ -98,7 +117,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		query,
 		req.Login,
 		hashedPassword,
-		role, // Всегда "Пользователь"
+		role, // Передаем строку role
 		time.Now(),
 	).Scan(&user.ID, &user.Login, &user.Role, &user.CreatedAt)
 
@@ -111,7 +130,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	// Ответ без чувствительных данных
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
+	json.NewEncoder(w).Encode(user) // Возвращаем всего юзера (где role уже строка)
 }
 
 // LoginUser обрабатывает аутентификацию пользователей.
@@ -157,13 +176,16 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Генерация JWT
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	// Формируем claims с строковой ролью
+	claims := jwt.MapClaims{
 		"id":    user.ID,
 		"login": user.Login,
-		"role":  user.Role,
+		"role":  user.Role, // Передаем строку user.Role напрямую
 		"exp":   time.Now().Add(72 * time.Hour).Unix(),
-	})
+	}
+
+	// Генерация JWT
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	// Подписываем JWT тем же секретом, который использует middleware
 	tokenString, err := token.SignedString(middleware.GetJWTSecret())
 	if err != nil {
@@ -172,15 +194,15 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Устанавливаем куку с токеном. Для логина используем SameSiteNoneMode.
-	setTokenCookie(w, tokenString, http.SameSiteNoneMode)
+	// Устанавливаем куку с токеном
+	setTokenCookie(w, tokenString)
 
-	// Ответ
+	// Ответ со строковой ролью
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Login successful",
-		"role":    user.Role,
+		"role":    user.Role, // Возвращаем строку user.Role напрямую
 		"id":      user.ID,
 	})
 }
@@ -205,7 +227,7 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":   userID,
 		"role": role,
-		"exp":  time.Now().Add(72 * time.Hour).Unix(),
+		"exp":  time.Now().Add(1 * time.Minute).Unix(),
 	})
 	tokenString, err := token.SignedString(middleware.GetJWTSecret())
 	if err != nil {
@@ -214,8 +236,8 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Обновляем куку с новым токеном. Для обновления используем SameSiteLaxMode.
-	setTokenCookie(w, tokenString, http.SameSiteLaxMode)
+	// Обновляем куку с новым токеном. Используем setTokenCookie, которая теперь всегда ставит Lax.
+	setTokenCookie(w, tokenString) // Передаваемый SameSite игнорируется функцией
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -224,25 +246,60 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func Me(w http.ResponseWriter, r *http.Request) {
+// Me возвращает информацию о текущем пользователе
+func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID, ok := ctx.Value(middleware.UserIDKey).(int)
 	if !ok {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
-		return
-	}
-	role, ok := ctx.Value(middleware.RoleKey).(string)
-	if !ok {
-		http.Error(w, "Invalid user role", http.StatusUnauthorized)
+		RespondWithError(w, http.StatusUnauthorized, "Invalid user ID in context")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":   userID,
-		"role": role,
-	})
+	// 1. Получаем полные данные пользователя из репозитория
+	user, err := h.UserRepo.GetUserByID(ctx, userID)
+	if err != nil {
+		if err == db.ErrNotFound { // Используем стандартную ошибку репозитория
+			RespondWithError(w, http.StatusNotFound, "User not found in database")
+		} else {
+			log.Printf("Error fetching user %d for /me: %v", userID, err)
+			RespondWithError(w, http.StatusInternalServerError, "Failed to retrieve user data")
+		}
+		return
+	}
+
+	// 2. Создаем структуру для ответа
+	type UserResponse struct {
+		ID      int             `json:"id"`
+		Name    string          `json:"name"`
+		Email   string          `json:"email"`
+		Phone   string          `json:"phone"`
+		Role    models.UserRole `json:"role"`
+		Partner *models.Partner `json:"partner,omitempty"` // Используем указатель из models
+	}
+
+	response := UserResponse{
+		ID:    user.ID,
+		Name:  user.Name,
+		Email: user.Email,
+		Phone: user.Phone,
+		Role:  user.Role,
+	}
+
+	// 3. Получаем данные партнера, если он есть
+	if user.PartnerID != nil {
+		partner, err := h.PartnerRepo.GetPartnerByID(ctx, *user.PartnerID)
+		if err != nil {
+			// Если партнер не найден или другая ошибка - логируем, но не прерываем запрос
+			log.Printf("Warning: could not fetch partner %d for user %d in /me: %v", *user.PartnerID, userID, err)
+		} else {
+			response.Partner = partner // Присваиваем найденного партнера
+		}
+	}
+
+	// 4. Отправляем успешный ответ
+	RespondWithJSON(w, http.StatusOK, response)
 }
+
 func LogoutUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -255,7 +312,8 @@ func LogoutUser(w http.ResponseWriter, r *http.Request) {
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
 		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
+		Path:     "/",                  // Явно указываем Path и для удаления
+		SameSite: http.SameSiteLaxMode, // Используем Lax и при удалении
 	}
 	http.SetCookie(w, cookie)
 

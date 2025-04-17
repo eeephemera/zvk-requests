@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/eeephemera/zvk-requests/models"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -36,12 +37,12 @@ func ValidateToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("token")
 		if err != nil {
-			log.Println("ValidateToken: no cookie found:", err)
+			// Keep log for missing cookie if desired, or remove
+			// log.Println("ValidateToken: no cookie found:", err)
 			http.Error(w, "Authorization cookie is missing", http.StatusUnauthorized)
 			return
 		}
-		log.Println("ValidateToken: received token:", cookie.Value)
-		// Далее – разбор и проверка JWT...
+
 		tokenString := cookie.Value
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -50,56 +51,75 @@ func ValidateToken(next http.Handler) http.Handler {
 			return jwtSecret, nil
 		})
 		if err != nil || !token.Valid {
-			log.Printf("ValidateToken: token invalid: %v", err)
+			log.Printf("ValidateToken: token invalid: %v", err) // Keep log for invalid token
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
-		// Если все OK, выводим информацию о пользователе:
+
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			log.Println("ValidateToken: failed to parse claims")
+			log.Println("ValidateToken: failed to parse claims") // Keep log for parsing failure
 			http.Error(w, "Failed to parse token claims", http.StatusUnauthorized)
 			return
 		}
-		idValue, ok := claims["id"].(float64)
+
+		userID, ok := claims["id"].(float64)
 		if !ok {
-			log.Println("ValidateToken: invalid id in claims")
+			// Keep log for invalid ID type if desired
+			// log.Println("ValidateToken: invalid id type in claims")
 			http.Error(w, "Invalid user ID in token", http.StatusUnauthorized)
 			return
 		}
-		role, ok := claims["role"].(string)
+
+		roleValue, ok := claims["role"].(string)
 		if !ok {
-			log.Println("ValidateToken: invalid role in claims")
-			http.Error(w, "Invalid user role in token", http.StatusUnauthorized)
+			// Keep log for invalid role type if desired
+			// log.Println("ValidateToken: invalid role type in claims (expected string)")
+			http.Error(w, "Invalid user role format in token", http.StatusUnauthorized)
 			return
 		}
-		log.Printf("ValidateToken: token OK: userID=%d, role=%s", int(idValue), role)
-		ctx := context.WithValue(r.Context(), UserIDKey, int(idValue))
-		ctx = context.WithValue(ctx, RoleKey, role)
+
+		if roleValue != string(models.RoleUser) && roleValue != string(models.RoleManager) {
+			// Keep log for unknown role value
+			// log.Println("ValidateToken: unknown role string:", roleValue)
+			http.Error(w, "Invalid user role value in token", http.StatusUnauthorized)
+			return
+		}
+
+		// console.log(`ValidateToken: token OK: userID=%d, role=%s`, userID, roleValue) // Removed log
+		ctx := context.WithValue(r.Context(), UserIDKey, int(userID))
+		ctx = context.WithValue(ctx, RoleKey, roleValue)
 		next.ServeHTTP(w, r.WithContext(ctx))
-		log.Println("Request Headers:", r.Header)
 	})
 }
 
-// RequireRole возвращает middleware, которое разрешает доступ только указанным ролям.
+// RequireRole возвращает middleware, которое разрешает доступ только указанным ролям (строкам).
 func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Извлекаем роль пользователя из контекста
 			role, ok := r.Context().Value(RoleKey).(string)
 			if !ok {
+				// Keep log for missing role in context if desired
+				// log.Println("RequireRole: role not found in context or not a string")
 				http.Error(w, "User role not found", http.StatusForbidden)
 				return
 			}
-			// Проверяем, входит ли роль пользователя в список разрешённых
-			for _, allowed := range allowedRoles {
-				if role == allowed {
-					next.ServeHTTP(w, r)
-					return
+
+			allowed := false
+			for _, allowedRole := range allowedRoles {
+				if role == allowedRole {
+					allowed = true
+					break
 				}
 			}
-			// Если роль не подходит – возвращаем ошибку доступа
-			http.Error(w, "Forbidden", http.StatusForbidden)
+
+			if allowed {
+				next.ServeHTTP(w, r)
+			} else {
+				// Keep log for forbidden access if desired
+				// log.Printf("RequireRole: Forbidden access for role '%s'. Allowed: %v", role, allowedRoles)
+				http.Error(w, "Forbidden", http.StatusForbidden)
+			}
 		})
 	}
 }

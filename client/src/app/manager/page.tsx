@@ -1,304 +1,240 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import RequestDetailsModal from "../../components/RequestDetailsModal";
-import { Request, downloadRequestFile, updateRequestStatus, deleteRequest } from "../../services/requestService";
+import {
+  getAllRequests,
+  downloadRequestFile,
+  updateRequestStatus,
+  deleteRequest,
+  getRequestByIdForManager
+} from "@/services/managerRequestService";
+import { Request } from "@/services/requestService";
+import { ApiError, PaginatedResponse } from "@/services/apiClient";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import Header from '@/components/Header';
 
 // Количество элементов на странице
 const ITEMS_PER_PAGE = 10;
 
 export default function ManagerPage() {
-  const [requests, setRequests] = useState<Request[]>([]);
-  const [filteredRequests, setFilteredRequests] = useState<Request[]>([]);
-  const [selectedRequest, setSelectedRequest] = useState<Request | null>(null);
-  const [error, setError] = useState("");
-  const [requestError, setRequestError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingSingleRequest, setLoadingSingleRequest] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [downloadingFile, setDownloadingFile] = useState(false);
-  const [fileDownloadError, setFileDownloadError] = useState<string | null>(null);
-  // Новые состояния для обновления статуса и удаления
-  const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  
-  // Состояния для фильтрации и сортировки
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterOrg, setFilterOrg] = useState<string>('');
   const [sortField, setSortField] = useState<string>('id');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  
-  // Состояния для пагинации
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [totalPages, setTotalPages] = useState<number>(1);
+  const [selectedRequest, setSelectedRequest] = useState<Request | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [loadingSingleRequest, setLoadingSingleRequest] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [downloadingFile, setDownloadingFile] = useState(false);
+  const [fileDownloadError, setFileDownloadError] = useState<string | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [statusUpdateError, setStatusUpdateError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState<boolean>(false);
   
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
 
-  // Фетч списка заявок при монтировании компонента
-  useEffect(() => {
-    const fetchRequests = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests`, {
-          credentials: "include",
-        });
-        if (!res.ok) {
-          throw new Error("Не удалось загрузить заявки");
-        }
-        const data = await res.json();
-        // Убедимся, что data всегда массив, даже если сервер вернул null
-        setRequests(Array.isArray(data) ? data : []);
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Неизвестная ошибка");
-        // В случае ошибки устанавливаем пустой массив, а не null     
-        setRequests([]);
-      } finally {
-        setLoading(false);
+  const { 
+    data: paginatedData,
+    isLoading: isLoadingRequests,
+    isError: isErrorRequests,
+    error: errorRequests,
+    isFetching: isFetchingRequests,
+  } = useQuery<PaginatedResponse<Request>, ApiError | Error | null>({
+    queryKey: ['allRequests', currentPage, ITEMS_PER_PAGE, filterStatus, filterOrg, sortField, sortDirection],
+    queryFn: () => getAllRequests(currentPage, ITEMS_PER_PAGE, filterStatus, filterOrg, sortField, sortDirection),
+  });
+
+  const requests = useMemo(() => paginatedData?.items ?? [], [paginatedData]);
+  const totalItems = useMemo(() => paginatedData?.total ?? 0, [paginatedData]);
+  const totalPages = useMemo(() => Math.ceil(totalItems / ITEMS_PER_PAGE) || 1, [totalItems]);
+
+  const listRequestError = useMemo(() => {
+    const err = errorRequests;
+    if (!isErrorRequests || !err) return null;
+    
+    let displayError = 'Произошла ошибка при загрузке списка заявок.';
+    if (err instanceof ApiError) {
+      if (err.status >= 500) {
+        displayError = "Ошибка на сервере при загрузке списка заявок.";
+      } else if (err.status === 401 || err.status === 403) {
+        displayError = "Ошибка доступа к списку заявок.";
+      } else {
+        displayError = err.message || displayError;
       }
-    };
+    } else if (err instanceof Error) {
+      displayError = err.message;
+    }
+    return displayError;
+  }, [isErrorRequests, errorRequests]);
 
-    fetchRequests();
-  }, []);
-
-  // Фильтрация и сортировка заявок
   useEffect(() => {
-    if (!requests.length) {
-      setFilteredRequests([]);
-      setTotalPages(1);
+    const requestIdStr = searchParams.get("requestId");
+    
+    if (!requestIdStr) {
+      if (selectedRequest) setSelectedRequest(null);
+      if (isLoadingDetails) setIsLoadingDetails(false); 
       return;
     }
 
-    let result = [...requests];
-
-    // Фильтрация по статусу
-    if (filterStatus) {
-      result = result.filter(req => req.status === filterStatus);
+    const id = parseInt(requestIdStr, 10);
+    if (isNaN(id)) {
+        if (selectedRequest) setSelectedRequest(null);
+        if (isLoadingDetails) setIsLoadingDetails(false);
+        router.replace("/manager", { scroll: false });
+        return;
+    }
+    
+    if (selectedRequest && selectedRequest.id === id && !isLoadingDetails) {
+        return;
     }
 
-    // Фильтрация по названию организации (частичное совпадение)
-    if (filterOrg) {
-      const lowerFilterOrg = filterOrg.toLowerCase();
-      result = result.filter(req => 
-        req.organization_name.toLowerCase().includes(lowerFilterOrg));
+    if (!isLoadingDetails) {
+        setIsLoadingDetails(true);
     }
-
-    // Сортировка
-    result.sort((a, b) => {
-      let comparison = 0;
-      
-      switch (sortField) {
-        case 'id':
-          comparison = a.id - b.id;
-          break;
-        case 'organization_name':
-          comparison = a.organization_name.localeCompare(b.organization_name);
-          break;
-        case 'created_at':
-          comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-          break;
-        case 'implementation_date':
-          comparison = new Date(a.implementation_date).getTime() - new Date(b.implementation_date).getTime();
-          break;
-        case 'status':
-          comparison = a.status.localeCompare(b.status);
-          break;
-        default:
-          comparison = 0;
-      }
-      
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
-
-    // Вычисляем общее количество страниц
-    const pages = Math.ceil(result.length / ITEMS_PER_PAGE);
-    setTotalPages(pages || 1);
-
-    // Применяем пагинацию к результатам
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    const paginatedResults = result.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     
-    setFilteredRequests(paginatedResults);
-  }, [requests, filterStatus, filterOrg, sortField, sortDirection, currentPage]);
+    if (!isLoadingRequests && !isFetchingRequests) {
+      const foundRequest = requests.find((req) => req.id === id);
 
-  // Установка selectedRequest на основе параметров URL
-  useEffect(() => {
-    const requestId = searchParams.get("requestId");
-    
-    // Не делаем запрос, если в процессе удаления
-    if (isDeleting || !requestId) {
-      if (!requestId) {
-        setSelectedRequest(null);
+      if (foundRequest) {
+        setSelectedRequest(foundRequest);
+        setIsLoadingDetails(false);
         setRequestError(null);
+      } else {
+        setSelectedRequest(null);
+        setIsLoadingDetails(false);
+        setRequestError(`Заявка с ID ${id} не найдена.`);
       }
-      return;
-    }
-    
-    const id = parseInt(requestId, 10);
-    const request = requests.find((req) => req.id === id);
-    if (request) {
-      setSelectedRequest(request);
-      setRequestError(null);
     } else {
-      // Фетч отдельной заявки, если её нет в списке
-      const fetchSingleRequest = async () => {
-        setLoadingSingleRequest(true);
-        try {
-          const res = await fetch(
-            `${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${id}`,
-            { credentials: "include" }
-          );
-          if (res.ok) {
-            const singleRequest = await res.json();
-            setSelectedRequest(singleRequest);
-            setRequestError(null);
-          } else if (res.status === 404) {
-            // Заявка не найдена - очищаем параметр requestId из URL без показа ошибки
-            setSelectedRequest(null);
-            console.log(`Заявка с ID ${id} не найдена, очищаем URL`);
-            router.replace("/manager", { scroll: false });
-          } else {
-            setSelectedRequest(null);
-            setRequestError("Ошибка при загрузке заявки");
-          }
-        } catch (err: unknown) {
-          setSelectedRequest(null);
-          setRequestError(err instanceof Error ? err.message : "Ошибка при загрузке заявки");
-        } finally {
-          setLoadingSingleRequest(false);
-        }
-      };
-      fetchSingleRequest();
+        // Если список еще грузится/обновляется, просто остаемся в состоянии isLoadingDetails = true
     }
-  }, [searchParams, requests, router, isDeleting]);
 
-  // Переход к заявке по клику на строку
+  }, [searchParams, requests, isLoadingRequests, isFetchingRequests, router, selectedRequest, isLoadingDetails]);
+
+  const mutationUpdateStatus = useMutation<Request, ApiError | Error, { requestId: number; status: string }>({ 
+    mutationFn: ({ requestId, status }) => updateRequestStatus(requestId, status),
+    onSuccess: (updatedRequest) => {
+      queryClient.invalidateQueries({ queryKey: ['allRequests'] });
+      if (selectedRequest && selectedRequest.id === updatedRequest.id) {
+        setSelectedRequest(updatedRequest);
+      }
+      setStatusUpdateError(null);
+    },
+    onError: (error) => {
+      let msg = "Ошибка обновления статуса.";
+      if (error instanceof ApiError) {
+        msg = error.message || (error.status === 404 ? "Заявка не найдена." : msg);
+      } else if (error instanceof Error) {
+         msg = error.message;
+      }
+      setStatusUpdateError(msg);
+      console.error("Ошибка обновления статуса:", error);
+    },
+    onSettled: () => {
+        setUpdatingStatus(false);
+    }
+  });
+
+  const mutationDelete = useMutation<void, ApiError | Error, number>({ 
+    mutationFn: (requestId) => deleteRequest(requestId),
+    onSuccess: (_, requestId) => {
+      queryClient.invalidateQueries({ queryKey: ['allRequests'] });
+      if (selectedRequest && selectedRequest.id === requestId) {
+        setSelectedRequest(null);
+        router.replace("/manager", { scroll: false });
+      }
+      setDeleteError(null);
+    },
+    onError: (error) => {
+      let msg = "Ошибка удаления заявки.";
+      if (error instanceof ApiError) {
+        msg = error.message || (error.status === 404 ? "Заявка не найдена." : msg);
+      } else if (error instanceof Error) {
+         msg = error.message;
+      }
+      setDeleteError(msg);
+      console.error("Ошибка удаления:", error);
+    },
+    onSettled: () => {
+      setIsDeleting(false);
+    }
+  });
+
+  const mutationDownloadFile = useMutation< { blob: Blob; filename: string }, ApiError | Error, number>({ 
+    mutationFn: (requestId) => downloadRequestFile(requestId),
+    onSuccess: ({ blob, filename }) => {
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 100);
+      setFileDownloadError(null);
+    },
+    onError: (error) => {
+      let msg = "Ошибка скачивания файла.";
+       if (error instanceof ApiError) {
+        msg = error.message || (error.status === 404 ? "Файл или заявка не найдены." : msg);
+      } else if (error instanceof Error) {
+         msg = error.message;
+      }
+      setFileDownloadError(msg);
+      console.error("Ошибка скачивания файла:", error);
+    },
+    onSettled: () => {
+      setDownloadingFile(false);
+    }
+  });
+
   const handleRowClick = (request: Request) => {
     router.push(`/manager?requestId=${request.id}`);
   };
 
-  // Функция для скачивания файла
-  const handleDownloadFile = async (requestId: number) => {
-    if (downloadingFile) return;
-    
+  const handleDownloadFile = (requestId: number) => {
+    if (mutationDownloadFile.isPending) return;
     setDownloadingFile(true);
     setFileDownloadError(null);
-    
-    try {
-      const result = await downloadRequestFile(requestId);
-      
-      if (!result.success) {
-        throw new Error(result.error || "Не удалось загрузить файл");
-      }
-      
-      // Создаем URL для скачивания
-      const url = window.URL.createObjectURL(result.blob!);
-      
-      // Создаем временную ссылку для скачивания
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', result.filename || `file-${requestId}`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      
-      // Освобождаем URL объект
-      setTimeout(() => window.URL.revokeObjectURL(url), 100);
-    } catch (err) {
-      console.error("Ошибка при скачивании файла:", err);
-      setFileDownloadError(err instanceof Error ? err.message : "Ошибка при скачивании файла");
-    } finally {
-      setDownloadingFile(false);
-    }
+    mutationDownloadFile.mutate(requestId);
   };
 
-  // Обработчик обновления статуса заявки
-  const handleUpdateStatus = async (requestId: number, status: string) => {
-    if (updatingStatus) return;
-    
+  const handleUpdateStatus = (requestId: number, status: string) => {
+    if (mutationUpdateStatus.isPending) return;
     setUpdatingStatus(true);
     setStatusUpdateError(null);
-    
-    try {
-      const result = await updateRequestStatus(requestId, status);
-      
-      if (!result.success) {
-        throw new Error(result.error || "Не удалось обновить статус заявки");
-      }
-      
-      // Обновляем список заявок и выбранную заявку
-      setRequests(prevRequests => 
-        prevRequests.map(req => 
-          req.id === requestId ? { ...req, status, updated_at: new Date().toISOString() } : req
-        )
-      );
-      
-      if (selectedRequest && selectedRequest.id === requestId) {
-        setSelectedRequest(prev => prev ? { ...prev, status, updated_at: new Date().toISOString() } : null);
-      }
-      
-    } catch (err) {
-      console.error("Ошибка при обновлении статуса:", err);
-      setStatusUpdateError(err instanceof Error ? err.message : "Ошибка при обновлении статуса");
-    } finally {
-      setUpdatingStatus(false);
-    }
+    mutationUpdateStatus.mutate({ requestId, status });
   };
 
-  // Обработчик удаления заявки
-  const handleDeleteRequest = async (requestId: number) => {
-    if (isDeleting) return;
-    
+  const handleDeleteRequest = (requestId: number) => {
+    if (mutationDelete.isPending) return;
     setIsDeleting(true);
     setDeleteError(null);
-    
-    try {
-      const result = await deleteRequest(requestId);
-      
-      if (!result.success) {
-        throw new Error(result.error || "Не удалось удалить заявку");
-      }
-      
-      // Удаляем заявку из списка
-      setRequests(prevRequests => prevRequests.filter(req => req.id !== requestId));
-      
-      // Закрываем модальное окно и перенаправляем на страницу списка
-      setSelectedRequest(null);
-      router.replace("/manager", { scroll: false });
-      
-    } catch (err) {
-      console.error("Ошибка при удалении заявки:", err);
-      setDeleteError(err instanceof Error ? err.message : "Ошибка при удалении заявки");
-    } finally {
-      setIsDeleting(false);
-    }
+    mutationDelete.mutate(requestId);
   };
 
-  // Обработчик изменения сортировки
   const handleSort = (field: string) => {
     if (sortField === field) {
-      // Если поле то же, меняем направление
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
     } else {
-      // Если новое поле, устанавливаем его и сортируем по убыванию
       setSortField(field);
       setSortDirection('desc');
     }
-    // Сбрасываем на первую страницу при изменении сортировки
     setCurrentPage(1);
   };
 
-  // Функция для перехода на определенную страницу
   const goToPage = (page: number) => {
     if (page >= 1 && page <= totalPages) {
       setCurrentPage(page);
     }
   };
 
-  // Функция для форматирования даты
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString("ru-RU", {
@@ -308,44 +244,40 @@ export default function ManagerPage() {
     });
   };
 
-  // Функция для определения цвета статуса
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "Новая":
-        return "text-discord-info";
       case "На рассмотрении":
-        return "text-discord-info";
-      case "В обработке":
-        return "text-discord-warning";
+        return "bg-yellow-100 text-yellow-800";
+      case "В работе":
+        return "bg-purple-100 text-purple-800";
       case "Выполнена":
-        return "text-discord-success";
+        return "bg-green-100 text-green-800";
       case "Отклонена":
-        return "text-discord-danger";
+        return "bg-red-100 text-red-800";
       default:
-        return "text-discord-text-muted";
+        return "bg-gray-100 text-gray-800";
     }
   };
 
-  // Все возможные статусы заявок
-  const statuses = ["Новая", "На рассмотрении", "В обработке", "Выполнена", "Отклонена"];
+  const statuses = ["На рассмотрении", "В работе", "Выполнена", "Отклонена"];
 
   return (
-    <ProtectedRoute allowedRoles={["Менеджер"]}>
-      <div style={{ background: 'var(--discord-bg)' }} className="min-h-screen p-6">
-        <div className="container mx-auto animate-fadeIn">
+    <ProtectedRoute allowedRoles={["MANAGER"]}>
+      <div className="min-h-screen flex flex-col bg-discord-background">
+        <Header />
+        <div className="container mx-auto p-6 flex-grow">
           <div className="discord-card p-6 mb-6">
             <h1 className="text-2xl font-bold text-discord-text flex items-center mb-6">
               <span className="bg-discord-accent h-8 w-1 rounded-full mr-3"></span>
-              Панель управления заявками
+              Панель управления заявками {(isFetchingRequests && !isLoadingRequests) ? '(Обновление...)' : ''}
             </h1>
             
-            {error && (
+            {listRequestError && (
               <div className="p-3 bg-discord-danger bg-opacity-20 rounded-lg border border-discord-danger border-opacity-30 mb-4">
-                <p className="text-discord-danger">{error}</p>
+                <p className="text-discord-danger">{listRequestError}</p>
               </div>
             )}
 
-            {/* Фильтры и сортировка */}
             <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label htmlFor="status-filter" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
@@ -358,7 +290,7 @@ export default function ManagerPage() {
                   value={filterStatus}
                   onChange={(e) => {
                     setFilterStatus(e.target.value);
-                    setCurrentPage(1); // Сбрасываем на первую страницу при изменении фильтра
+                    setCurrentPage(1);
                   }}
                 >
                   <option value="">Все статусы</option>
@@ -380,7 +312,7 @@ export default function ManagerPage() {
                   value={filterOrg}
                   onChange={(e) => {
                     setFilterOrg(e.target.value);
-                    setCurrentPage(1); // Сбрасываем на первую страницу при изменении фильтра
+                    setCurrentPage(1);
                   }}
                 />
               </div>
@@ -398,7 +330,7 @@ export default function ManagerPage() {
                     const [field, direction] = e.target.value.split('-');
                     setSortField(field);
                     setSortDirection(direction as 'asc' | 'desc');
-                    setCurrentPage(1); // Сбрасываем на первую страницу при изменении сортировки
+                    setCurrentPage(1);
                   }}
                 >
                   <option value="id-desc">ID (новые сверху)</option>
@@ -413,27 +345,26 @@ export default function ManagerPage() {
               </div>
             </div>
 
-            {loading ? (
+            {isLoadingRequests ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <div className="w-12 h-12 border-2 border-discord-accent border-t-transparent rounded-full animate-spin"></div>
                 <p className="text-discord-text-muted mt-4">Загрузка заявок...</p>
               </div>
-            ) : !filteredRequests || filteredRequests.length === 0 ? (
+            ) : requests.length === 0 ? (
               <div className="discord-glass p-8 flex flex-col items-center justify-center text-center">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-discord-text-muted mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 <h3 className="text-xl font-medium text-discord-text">Заявки отсутствуют</h3>
                 <p className="text-discord-text-muted mt-2 max-w-md">
-                  {requests.length > 0 
+                  {totalItems > 0 
                     ? "По заданным критериям поиска не найдено заявок." 
-                    : "В данный момент в системе нет ни одной заявки. Заявки появятся здесь, когда пользователи их создадут."}
+                    : "В данный момент в системе нет ни одной заявки."}
                 </p>
               </div>
             ) : (
               <>
-                {/* Верхняя пагинация */}
-                {requests.length > ITEMS_PER_PAGE && (
+                {totalItems > ITEMS_PER_PAGE && (
                   <div className="flex justify-between items-center mb-4">
                     <button
                       onClick={() => goToPage(currentPage - 1)}
@@ -488,7 +419,7 @@ export default function ManagerPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredRequests.map((request) => (
+                      {requests.map((request) => (
                         <tr
                           key={request.id}
                           className="discord-table-row cursor-pointer hover:bg-discord-medium transition-colors duration-200"
@@ -515,8 +446,7 @@ export default function ManagerPage() {
                   </table>
                 </div>
 
-                {/* Нижняя пагинация */}
-                {requests.length > ITEMS_PER_PAGE && (
+                {totalItems > ITEMS_PER_PAGE && (
                   <div className="flex justify-between items-center mt-4">
                     <button
                       onClick={() => goToPage(currentPage - 1)}
@@ -541,28 +471,13 @@ export default function ManagerPage() {
             )}
           </div>
 
-          {loadingSingleRequest && !selectedRequest && (
-            <div className="discord-card p-6 flex justify-center items-center">
-              <div className="animate-spin h-8 w-8 border-2 border-discord-accent border-t-transparent rounded-full"></div>
-              <span className="ml-3 text-discord-text-muted">Загрузка заявки...</span>
-            </div>
-          )}
-
-          {requestError && !isDeleting && (
-            <div className="p-3 bg-discord-danger bg-opacity-20 rounded-lg border border-discord-danger border-opacity-30 mb-4">
-              <p className="text-discord-danger">{requestError}</p>
-            </div>
-          )}
-
           {selectedRequest && (
             <RequestDetailsModal
               isOpen={true}
-              onClose={() => {
-                router.push("/manager");
-                setRequestError(null);
-              }}
+              onClose={() => router.replace("/manager", { scroll: false })}
               request={selectedRequest}
-              downloadingFile={downloadingFile}
+              isLoadingDetails={isLoadingDetails}
+              downloadingFile={mutationDownloadFile.isPending}
               fileDownloadError={fileDownloadError}
               onDownloadFile={handleDownloadFile}
               formatDate={formatDate}
@@ -570,8 +485,8 @@ export default function ManagerPage() {
               isManager={true}
               onUpdateStatus={handleUpdateStatus}
               onDeleteRequest={handleDeleteRequest}
-              updatingStatus={updatingStatus}
-              deleting={isDeleting}
+              updatingStatus={mutationUpdateStatus.isPending}
+              deleting={mutationDelete.isPending}
               statusUpdateError={statusUpdateError}
               deleteError={deleteError}
             />

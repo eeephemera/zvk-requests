@@ -5,5 +5,6 @@ import "errors"
 
 var (
 	ErrAlreadyExists = errors.New("already exists")
-	ErrNotFound      = errors.New("record not foundd")
+	// ErrNotFound универсальная ошибка для не найденных записей.
+	ErrNotFound = errors.New("record not found")
 )

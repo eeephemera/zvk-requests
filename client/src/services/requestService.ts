@@ -1,544 +1,365 @@
-interface RequestData {
-    inn: string;
-    organizationName: string;
-    tzFile: File | null;
-    implementationDate: string;
-    fzType: string;
-    comment: string;
-    registryType: string;
-  }
+// --- Import base API client utilities ---
+import { apiFetch, ApiError, PaginatedResponse, fetchBlobWithFilename } from './apiClient'; // Updated import
+// --- Import related entity types ---
+import { Product } from './productService';
+import { Partner } from './partnerService';
+import { EndClient } from './endClientService';
+
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const REQUEST_TIMEOUT = 30000; // 30 seconds
+
+// --- Type Definitions specific to User Requests/Deal Registrations ---
+
+// Новый интерфейс для данных формы "Регистрация сделки"
+export interface DealRegistrationData {
+  // --- Основные участники ---
+  partnerId: number;          // Выбор партнера (обязательно)
+  distributorId?: number | null; // Выбор дистрибьютора (опционально?)
   
-  export interface Request {
+  // --- Конечный клиент ---
+  endClientId?: number | null;   // ID найденного клиента
+  endClientInn?: string;         // ИНН (для поиска/создания)
+  endClientName?: string;        // Имя (для создания)
+  endClientCity?: string;        // Город (для создания)
+  endClientFullAddress?: string; // Полный адрес (для создания)
+  endClientContactDetails?: string; // Контакты (для создания)
+
+  // --- Продукт/Спецификация (одна позиция) ---
+  productId?: number | null;         // ID выбранного продукта (опционально, если кастомный)
+  customItemSku?: string;        // Артикул кастомного продукта
+  customItemName?: string;       // Название кастомного продукта
+  customItemDescription?: string;// Описание кастомного продукта
+  quantity?: number | null;        // Количество (для кастомного или стандартного?)
+  unitPrice?: number | null;       // Цена за ед. (для кастомного?) 
+  // total_price будет вычисляться на бэкенде?
+
+  // --- Параметры сделки ---
+  dealDescription: string;           // Описание сути сделки (обязательно)
+  estimatedValue?: number | null;    // Оценочная стоимость (опционально)
+  estimatedCloseDate?: string | null;// Ожидаемая дата закрытия (опционально, строка ГГГГ-ММ-ДД)
+  fzLawType?: string;                // Тип ФЗ (например, "223", "44", "Коммерческий", "-")?
+  mptRegistryType?: string;          // Тип реестра (например, "Реестр", "Нереестр", "Неприменимо")?
+  partnerActivities?: string;        // Активности партнера (текст)
+  partnerContactOverride?: string;   // Контактное лицо партнера для этой сделки (текст)
+
+  // --- Вложение ---
+  attachmentFile?: File | null;    // ТЗ/Вложение (опционально)
+}
+
+// Общий интерфейс для заявки (подходит и для проекта, и для сделки?)
+// Возможно, понадобятся специфичные поля для сделки
+export interface Request {
+  [x: string]: any; // Оставляем для гибкости, НО стараемся типизировать явно
+  id: number;
+  user_id: number; // ID пользователя, создавшего заявку
+  // Поля из DealRegistrationData (если они сохраняются)
+  partner_id?: number;
+  distributor_id?: number; // Добавлено
+  end_client_id?: number;
+  deal_description?: string;
+  estimated_value?: number;
+  estimated_close_date?: string; // Добавлено
+  fz_law_type?: string;          // Добавлено
+  mpt_registry_type?: string;    // Добавлено
+  partner_activities?: string;   // Добавлено
+  partner_contact_override?: string; // Добавлено
+  end_client_details_override?: string; // Используется для ненайденных/переопределенных клиентов
+  // Общие поля
+  status: string;
+  created_at: string;
+  updated_at: string;
+  manager_comment?: string; // Комментарий менеджера
+  // В деталях может быть больше информации
+  partner?: Partner;     
+  product?: Product; // Может быть null, если заявка с кастомным продуктом?
+  end_client?: EndClient; 
+  distributor?: Partner; // Добавлено
+  items?: RequestItem[]; // Добавлено: Массив позиций заявки
+  attachment_file_name?: string; 
+  overall_tz_file?: string; // Имя файла из requests.overall_tz_file?
+}
+
+// Добавляем интерфейс для RequestItem (на основе server/models/request_item.go)
+export interface RequestItem {
     id: number;
-    user_id: number;
-    inn: string;
-    organization_name: string;
-    implementation_date: string;
-    fz_type: string;
-    registry_type: string;
-    comment: string;
-    tz_file: string;
-    status: string;
-    created_at: string;
-    updated_at: string;
+    request_id: number;
+    product_id?: number | null;
+    custom_item_sku?: string;
+    custom_item_name?: string;
+    custom_item_description?: string;
+    quantity: number; // Предполагаем, что количество всегда есть
+    unit_price?: number | null;
+    total_price?: number | null;
+    product?: Product | null; // Связанный продукт (если есть product_id)
+}
+
+// PaginatedResponse is imported from apiClient
+
+// --- User-specific Request Service Functions ---
+
+/**
+ * Submits a new deal registration (User action).
+ * Использует новый интерфейс DealRegistrationData.
+ * TODO: Implement actual API call when the backend endpoint is ready.
+ * TODO: Decide if using FormData or JSON (if file is optional/handled differently).
+ * Throws ApiError on failure. Returns the created Request on success.
+ */
+export async function submitDealRegistration(data: DealRegistrationData): Promise<Request> {
+  console.warn("submitDealRegistration: API call not implemented yet.");
+  // Валидация для новой формы
+  if (!data.partnerId || !data.dealDescription || (!data.endClientId && !data.endClientInn)) {
+     throw new ApiError("Пожалуйста, заполните все обязательные поля (Партнер, Описание сделки, ИНН или ID конечного клиента).", 400);
   }
-  
-  interface RequestResponse {
-    success: boolean;
-    data?: {
-      id?: number;
-      requestId?: number;
-      status?: string;
-      [key: string]: unknown; // For any additional properties
-    };
-    error?: string;
+  if (!data.endClientId && data.endClientInn && !data.endClientName) {
+      throw new ApiError("Пожалуйста, укажите Наименование нового конечного клиента.", 400);
   }
-  
-  export async function submitRequest(data: RequestData): Promise<RequestResponse> {
-    try {
-      if (!data.inn || !data.organizationName || !data.tzFile || !data.implementationDate) {
-        return {
-          success: false,
-          error: "Пожалуйста, заполните все обязательные поля."
-        };
-      }
-  
+
+  // Определяем, как отправлять: FormData или JSON
+  // Если есть файл, то FormData предпочтительнее.
+  const useFormData = !!data.attachmentFile;
+  let body: FormData | string;
+
+  if (useFormData) {
       const formData = new FormData();
-      formData.append("inn", data.inn);
-      formData.append("organization_name", data.organizationName);
-      if (data.tzFile) formData.append("tz_file", data.tzFile);
-      formData.append("implementation_date", data.implementationDate);
-      formData.append("fz_type", data.fzType);
-      formData.append("comment", data.comment);
-      formData.append("registry_type", data.registryType);
-  
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/requests`, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-  
-      if (!res.ok) {
-        const errorData = await res.json();
-        const message = errorData.message || "Ошибка отправки заявки";
-        
-        if (res.status === 400) return { success: false, error: "Неверный формат данных." };
-        if (res.status === 401) return { success: false, error: "Не авторизован." };
-        
-        return { success: false, error: message };
+      formData.append("partner_id", data.partnerId.toString());
+      formData.append("deal_description", data.dealDescription);
+      if (data.endClientId) {
+          formData.append("end_client_id", data.endClientId.toString());
       }
-  
-      const responseData = await res.json();
-      return {
-        success: true,
-        data: responseData
+      if (data.endClientInn) {
+          formData.append("end_client_inn", data.endClientInn);
+      }
+      if (data.endClientName) { // Отправляем только если создаем нового
+          formData.append("end_client_name", data.endClientName);
+      }
+       if (data.endClientCity) { // Отправляем только если создаем нового
+          formData.append("end_client_city", data.endClientCity);
+      }
+      if (data.endClientFullAddress) { // Отправляем только если создаем нового
+          formData.append("end_client_full_address", data.endClientFullAddress);
+      }
+      if (data.endClientContactDetails) { // Отправляем только если создаем нового
+          formData.append("end_client_contact_details", data.endClientContactDetails);
+      }
+      if (data.estimatedValue !== null && data.estimatedValue !== undefined) { // Проверяем на null и undefined
+          formData.append("estimated_value", data.estimatedValue.toString());
+      }
+      if (data.estimatedCloseDate) {
+          formData.append("estimated_close_date", data.estimatedCloseDate);
+      }
+      if (data.fzLawType) {
+          formData.append("fz_law_type", data.fzLawType);
+      }
+      if (data.mptRegistryType) {
+          formData.append("mpt_registry_type", data.mptRegistryType);
+      }
+      if (data.partnerActivities) {
+          formData.append("partner_activities", data.partnerActivities);
+      }
+      if (data.partnerContactOverride) {
+          formData.append("partner_contact_override", data.partnerContactOverride);
+      }
+      if (data.productId) {
+          formData.append("product_id", data.productId.toString());
+      }
+      if (data.customItemSku) {
+          formData.append("custom_item_sku", data.customItemSku);
+      }
+      if (data.customItemName) {
+          formData.append("custom_item_name", data.customItemName);
+      }
+      if (data.customItemDescription) {
+          formData.append("custom_item_description", data.customItemDescription);
+      }
+      if (data.quantity !== null && data.quantity !== undefined) {
+          formData.append("quantity", data.quantity.toString());
+      }
+      if (data.unitPrice !== null && data.unitPrice !== undefined) {
+          formData.append("unit_price", data.unitPrice.toString());
+      }
+      if (data.attachmentFile) {
+          formData.append("attachment_file", data.attachmentFile);
+      }
+      body = formData;
+    } else {
+      // Отправка как JSON
+      const payload: any = {
+          partner_id: data.partnerId,
+          deal_description: data.dealDescription,
       };
-    } catch (err: unknown) {
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : "Неизвестная ошибка"
-      };
-    }
-  }
-  
-  export async function getUserRequests(page?: number, limit?: number): Promise<{ success: boolean; requests?: Request[]; total?: number; error?: string }> {
-    try {
-      // Проверка сетевого соединения
-      if (typeof window !== 'undefined' && !navigator.onLine) {
-        return { 
-          success: false, 
-          error: "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова." 
-        };
+      if (data.endClientId) {
+           payload.end_client_id = data.endClientId;
       }
-
-      // Формирование URL с параметрами пагинации, если они предоставлены
-      let url = `${process.env.NEXT_PUBLIC_API_URL}/api/requests`;
-      if (page && limit) {
-        // Преобразуем page в offset
-        const offset = (page - 1) * limit;
-        url += `?limit=${limit}&offset=${offset}`;
+       if (data.endClientInn) {
+           payload.end_client_inn = data.endClientInn;
       }
-
-      // Установка таймаута для запроса
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаута
-
-      const res = await fetch(url, {
-        credentials: "include",
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!res.ok) {
-        if (res.status === 401) {
-          return { success: false, error: "Не авторизован" };
-        }
-        
-        if (res.status === 404) {
-          return { success: false, error: "Заявки не найдены" };
-        }
-        
-        if (res.status >= 500) {
-          return { success: false, error: "Ошибка сервера. Пожалуйста, попробуйте позже." };
-        }
-        
-        return { success: false, error: "Не удалось загрузить заявки" };
+       if (data.endClientName) { // Отправляем только если создаем нового
+           payload.end_client_name = data.endClientName;
       }
-
-      const data = await res.json();
-      
-      // Проверяем формат ответа - если это объект с пагинацией
-      if (data && typeof data === 'object' && 'items' in data && Array.isArray(data.items)) {
-        return { 
-          success: true, 
-          requests: data.items,
-          total: data.total
-        };
+      if (data.endClientCity) { // Отправляем только если создаем нового
+           payload.end_client_city = data.endClientCity;
       }
-      
-      // Стандартный формат - массив заявок
-      if (Array.isArray(data)) {
-        return { success: true, requests: data };
+       if (data.endClientFullAddress) { // Отправляем только если создаем нового
+           payload.end_client_full_address = data.endClientFullAddress;
       }
-      
-      return { success: false, error: "Неверный формат данных от сервера" };
-    } catch (err: unknown) {
-      console.error("Ошибка загрузки заявок:", err);
-      
-      // Обработка ошибки таймаута
-      if (err instanceof DOMException && err.name === "AbortError") {
-        return { 
-          success: false, 
-          error: "Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте позже." 
-        };
+       if (data.endClientContactDetails) { // Отправляем только если создаем нового
+           payload.end_client_contact_details = data.endClientContactDetails;
       }
-      
-      // Обработка сетевых ошибок
-      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
-        return { 
-          success: false, 
-          error: "Не удалось соединиться с сервером. Проверьте подключение к интернету." 
-        };
+       if (data.estimatedValue !== null && data.estimatedValue !== undefined) { // Проверяем на null и undefined
+           payload.estimated_value = data.estimatedValue;
       }
-      
-      return { 
-        success: false, 
-        error: err instanceof Error ? err.message : "Неизвестная ошибка при загрузке заявок" 
-      };
-    }
-  }
-  
-  // Функция для сохранения и загрузки черновиков
-  export function saveDraft(data: Partial<RequestData>): void {
-    try {
-      const draftData = { ...data };
-      delete draftData.tzFile;
-      localStorage.setItem('draftProject', JSON.stringify(draftData));
-    } catch (error) {
-      console.error("Ошибка сохранения черновика:", error);
-    }
-  }
-  
-  export function loadDraft(): Partial<RequestData> | null {
-    try {
-      const draftData = localStorage.getItem('draftProject');
-      return draftData ? JSON.parse(draftData) : null;
-    } catch (error) {
-      console.error("Ошибка загрузки черновика:", error);
-      return null;
-    }
+      if (data.estimatedCloseDate) {
+          payload.estimated_close_date = data.estimatedCloseDate;
+      }
+      if (data.fzLawType) {
+          payload.fz_law_type = data.fzLawType;
+      }
+      if (data.mptRegistryType) {
+          payload.mpt_registry_type = data.mptRegistryType;
+      }
+      if (data.partnerActivities) {
+          payload.partner_activities = data.partnerActivities;
+      }
+      if (data.partnerContactOverride) {
+          payload.partner_contact_override = data.partnerContactOverride;
+      }
+      if (data.productId) {
+          payload.product_id = data.productId;
+      }
+      if (data.customItemSku) {
+          payload.custom_item_sku = data.customItemSku;
+      }
+      if (data.customItemName) {
+          payload.custom_item_name = data.customItemName;
+      }
+      if (data.customItemDescription) {
+          payload.custom_item_description = data.customItemDescription;
+      }
+      if (data.quantity !== null && data.quantity !== undefined) {
+          payload.quantity = data.quantity;
+      }
+      if (data.unitPrice !== null && data.unitPrice !== undefined) {
+          payload.unit_price = data.unitPrice;
+      }
+      body = JSON.stringify(payload);
   }
 
-  /**
-   * Функция для скачивания файла ТЗ с обработкой ошибок
-   */
-  export async function downloadTzFile(requestId: number): Promise<{ success: boolean; blob?: Blob; filename?: string; error?: string }> {
-    try {
-      // Проверка сетевого соединения
-      if (typeof window !== 'undefined' && !navigator.onLine) {
-        return { 
-          success: false, 
-          error: "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова." 
-        };
-      }
-      
-      // Установка таймаута для запроса
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаута
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/requests/${requestId}/tz_file`, {
-        credentials: "include",
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        if (response.status === 401) {
-          return { success: false, error: "Не авторизован" };
-        }
-        
-        if (response.status === 404) {
-          return { success: false, error: "Файл не найден" };
-        }
-        
-        if (response.status >= 500) {
-          return { success: false, error: "Ошибка сервера. Пожалуйста, попробуйте позже." };
-        }
-        
-        return { success: false, error: `Ошибка загрузки файла: ${response.status}` };
-      }
-      
-      const blob = await response.blob();
-      
-      // Извлекаем имя файла из заголовков ответа
-      const contentDisposition = response.headers.get('content-disposition');
-      let filename = 'tz_file';
-      
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1].replace(/['"]/g, '');
-        }
-      }
-      
-      return { success: true, blob, filename };
-    } catch (err: unknown) {
-      console.error("Ошибка при скачивании файла:", err);
-      
-      // Обработка ошибки таймаута
-      if (err instanceof DOMException && err.name === "AbortError") {
-        return { 
-          success: false, 
-          error: "Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте позже." 
-        };
-      }
-      
-      // Обработка сетевых ошибок
-      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
-        return { 
-          success: false, 
-          error: "Не удалось соединиться с сервером. Проверьте подключение к интернету." 
-        };
-      }
-      
-      return { 
-        success: false, 
-        error: err instanceof Error ? err.message : "Неизвестная ошибка при скачивании файла" 
-      };
-    }
+  try {
+    // TODO: Уточнить эндпоинт для регистрации сделок. Может быть тот же /api/requests?
+    // Бэкенд должен будет определить тип запроса по наличию partner_id/product_id.
+    // const createdRequest = await apiFetch<Request>('/api/requests', {
+    //   method: 'POST',
+    //   body: body,
+    //   // Если отправляем JSON, нужен заголовок
+    //   headers: useFormData ? undefined : { 'Content-Type': 'application/json' },
+    // });
+    // return createdRequest;
+
+    // Моковый ответ
+    await new Promise(resolve => setTimeout(resolve, 800));
+    console.log("Mock submitting deal registration with data:", data);
+    const mockId = Math.floor(Math.random() * 1000) + 500;
+    // Возвращаем моковый объект Request
+    return {
+      id: mockId,
+      user_id: 1, // Пример ID пользователя
+      partner_id: data.partnerId,
+      end_client_id: data.endClientId ?? undefined,
+      deal_description: data.dealDescription,
+      estimated_value: data.estimatedValue === null ? undefined : data.estimatedValue,
+      status: "На рассмотрении", // Начальный статус
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+  } catch (err) {
+    console.error("User: Error submitting deal registration:", err);
+      throw err;
   }
+}
 
-  /**
-   * Функция для получения общего количества заявок пользователя
-   */
-  export async function getTotalRequestsCount(): Promise<{ success: boolean; total?: number; error?: string }> {
-    try {
-      // Проверка сетевого соединения
-      if (typeof window !== 'undefined' && !navigator.onLine) {
-        return { 
-          success: false, 
-          error: "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова." 
-        };
-      }
-      
-      // На случай, если у сервера нет специального метода для подсчета,
-      // делаем запрос с большим лимитом, чтобы определить общее количество
-      // Запрашиваем только 1 элемент, но со смещением 0 и count=true
-      const url = `${process.env.NEXT_PUBLIC_API_URL}/api/requests?limit=1&offset=0&count=true`;
-      
-      // Установка таймаута для запроса
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаута
-      
-      const res = await fetch(url, {
-        credentials: "include",
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!res.ok) {
-        if (res.status === 401) {
-          return { success: false, error: "Не авторизован" };
-        }
-        
-        return { success: false, error: "Не удалось получить количество заявок" };
-      }
-      
-      const data = await res.json();
-      
-      // Проверяем, содержит ли ответ поле total
-      if (data && 'total' in data) {
-        return { success: true, total: data.total };
-      }
-      
-      // Если сервер вернул массив вместо объекта с total,
-      // мы не можем точно определить общее количество
-      return { success: false, error: "Сервер не поддерживает подсчет общего количества" };
-    } catch (err: unknown) {
-      console.error("Ошибка при получении количества заявок:", err);
-      
-      return { 
-        success: false, 
-        error: err instanceof Error ? err.message : "Неизвестная ошибка" 
-      };
-    }
+/**
+ * Fetches requests (projects or deals) for the current user (paginated).
+ * Throws ApiError on failure. Returns PaginatedResponse<Request> on success.
+ */
+export async function getUserRequests(page: number = 1, limit: number = 10): Promise<PaginatedResponse<Request>> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+  });
+
+  try {
+    // User endpoint for getting their requests (projects and/or deals)
+    return await apiFetch<PaginatedResponse<Request>>(`/api/requests/my?${params.toString()}`); // Используем /my эндпоинт
+  } catch (err) {
+    console.error(`User: Error fetching requests (page: ${page}, limit: ${limit}):`, err);
+        throw err;
   }
+}
 
-  /**
-   * Функция для скачивания файла заявки через интерфейс менеджера
-   */
-  export async function downloadRequestFile(requestId: number): Promise<{ success: boolean; blob?: Blob; filename?: string; error?: string }> {
-    try {
-      // Проверка сетевого соединения
-      if (typeof window !== 'undefined' && !navigator.onLine) {
-        return { 
-          success: false, 
-          error: "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова." 
-        };
-      }
-      
-      // Установка таймаута для запроса
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаута
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${requestId}/file`, {
-        credentials: "include",
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        if (response.status === 401) {
-          return { success: false, error: "Не авторизован" };
-        }
-        
-        if (response.status === 404) {
-          return { success: false, error: "Файл не найден" };
-        }
-        
-        if (response.status >= 500) {
-          return { success: false, error: "Ошибка сервера. Пожалуйста, попробуйте позже." };
-        }
-        
-        return { success: false, error: `Ошибка загрузки файла: ${response.status}` };
-      }
-      
-      const blob = await response.blob();
-      
-      // Извлекаем имя файла из заголовков ответа
-      const contentDisposition = response.headers.get('content-disposition');
-      let filename = `file-${requestId}`;
-      
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1].replace(/['"]/g, '');
-        }
-      }
-      
-      return { success: true, blob, filename };
-    } catch (err: unknown) {
-      console.error("Ошибка при скачивании файла:", err);
-      
-      // Обработка ошибки таймаута
-      if (err instanceof DOMException && err.name === "AbortError") {
-        return { 
-          success: false, 
-          error: "Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте позже." 
-        };
-      }
-      
-      // Обработка сетевых ошибок
-      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
-        return { 
-          success: false, 
-          error: "Не удалось соединиться с сервером. Проверьте подключение к интернету." 
-        };
-      }
-      
-      return { 
-        success: false, 
-        error: err instanceof Error ? err.message : "Неизвестная ошибка при скачивании файла" 
-      };
-    }
-  }
+/**
+ * Fetches the details of a specific request (project or deal) for the current user.
+ * TODO: Implement actual API call when the backend endpoint is ready.
+ * Throws ApiError on failure. Returns the detailed Request on success.
+ */
+export async function getRequestDetails(id: number): Promise<Request> {
+    console.warn(`getRequestDetails(${id}): API call not implemented yet.`);
+    // TODO: Обновить моковые данные или реализовать реальный вызов
+    // return await apiFetch<Request>(`/api/requests/my/${id}`);
 
-  /**
-   * Обновление статуса заявки менеджером
-   */
-  export async function updateRequestStatus(requestId: number, status: string): Promise<{ success: boolean; error?: string }> {
-    try {
-      if (typeof window !== 'undefined' && !navigator.onLine) {
-        return { 
-          success: false, 
-          error: "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова." 
-        };
-      }
+    // Обновленный моковый ответ (только для сделок)
+    await new Promise(resolve => setTimeout(resolve, 700));
+    const baseRequest: Partial<Request> = {
+        id: id,
+        user_id: 1,
+        status: ['На рассмотрении', 'В работе', 'Выполнена'][id % 3],
+        created_at: new Date(Date.now() - 86400000 * (id % 5)).toISOString(),
+        updated_at: new Date().toISOString(),
+    };
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${requestId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status }),
-        credentials: 'include',
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        if (response.status === 401) {
-          return { success: false, error: "Не авторизован" };
-        }
-        
-        if (response.status === 404) {
-          return { success: false, error: "Заявка не найдена" };
-        }
-        
-        if (response.status >= 500) {
-          return { success: false, error: "Ошибка сервера. Пожалуйста, попробуйте позже." };
-        }
-        
-        return { success: false, error: `Ошибка обновления статуса: ${response.status}` };
-      }
-      
-      return { success: true };
-    } catch (err: unknown) {
-      console.error("Ошибка при обновлении статуса заявки:", err);
-      
-      if (err instanceof DOMException && err.name === "AbortError") {
-        return { 
-          success: false, 
-          error: "Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте позже." 
-        };
-      }
-      
-      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
-        return { 
-          success: false, 
-          error: "Не удалось соединиться с сервером. Проверьте подключение к интернету." 
-        };
-      }
-      
-      return { 
-        success: false, 
-        error: err instanceof Error ? err.message : "Неизвестная ошибка при обновлении статуса" 
-      };
-    }
-  }
+    // Теперь все заявки - это "сделки"
+    return {
+        ...baseRequest,
+        partner_id: 101 + (id % 3),
+        end_client_id: 201 + (id % 2),
+        deal_description: 'Описание сделки номер ' + id + '. Очень важная сделка.',
+        estimated_value: 100000 * (id % 5 + 1),
+        partner: { id: 101 + (id % 3), name: `Партнер ${101 + (id % 3)}`, created_at: '', updated_at: ''}, 
+        end_client: { id: 201 + (id % 2), name: `Конечный Клиент ${201 + (id % 2)}`, inn: `ИНН-${201 + (id % 2)}`, created_at: '', updated_at: ''},
+        status: baseRequest.status ?? 'На рассмотрении',
+        created_at: baseRequest.created_at ?? '',
+        updated_at: baseRequest.updated_at ?? '',
+    } as Request;
+}
 
-  /**
-   * Удаление заявки менеджером
-   */
-  export async function deleteRequest(requestId: number): Promise<{ success: boolean; error?: string }> {
-    try {
-      if (typeof window !== 'undefined' && !navigator.onLine) {
-        return { 
-          success: false, 
-          error: "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова." 
-        };
-      }
+/**
+ * Downloads the attachment file associated with a specific request for the current user.
+ * TODO: Implement actual API call when the backend endpoint is ready.
+ * Throws ApiError on failure. Returns { blob: Blob, filename: string } on success.
+ */
+export async function downloadRequestFile(id: number): Promise<{ blob: Blob; filename: string }> {
+    console.warn(`downloadRequestFile(${id}): API call not implemented yet.`);
+    // return await fetchBlobWithFilename(`/api/requests/download/${id}`);
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/manager/requests/${requestId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        if (response.status === 401) {
-          return { success: false, error: "Не авторизован" };
-        }
-        
-        if (response.status === 404) {
-          return { success: false, error: "Заявка не найдена" };
-        }
-        
-        if (response.status === 409) {
-          return { success: false, error: "Невозможно удалить заявку, т.к. она связана с другими записями" };
-        }
-        
-        if (response.status >= 500) {
-          return { success: false, error: "Ошибка сервера. Пожалуйста, попробуйте позже." };
-        }
-        
-        return { success: false, error: `Ошибка удаления заявки: ${response.status}` };
-      }
-      
-      return { success: true };
-    } catch (err: unknown) {
-      console.error("Ошибка при удалении заявки:", err);
-      
-      if (err instanceof DOMException && err.name === "AbortError") {
-        return { 
-          success: false, 
-          error: "Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте позже." 
-        };
-      }
-      
-      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
-        return { 
-          success: false, 
-          error: "Не удалось соединиться с сервером. Проверьте подключение к интернету." 
-        };
-      }
-      
-      return { 
-        success: false, 
-        error: err instanceof Error ? err.message : "Неизвестная ошибка при удалении заявки" 
-      };
-    }
-  }
+    // Моковый ответ
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Имя файла теперь всегда attachment_...
+    const filename = `attachment_${id}.docx`; 
+    const content = `Это моковое содержимое файла для заявки ${id}.\nИмя файла: ${filename}\nТип: Сделка`;    
+    const blob = new Blob([content], { type: 'text/plain' });
+
+    return { blob, filename };
+}
+
+// --- Functions moved to managerRequestService.ts or draftService.ts ---
+// getAllRequests
+// getRequestById (User version is getRequestDetails)
+// updateRequestStatus
+// deleteRequest
+// saveDraft, loadDraft, clearDraft
+
+// --- Deprecated function --- (Optional: Mark old function explicitly)
+/**
+ * @deprecated Use submitProjectRequest for old form or submitDealRegistration for new form.
+ */
+// export const submitRequest = submitProjectRequest;

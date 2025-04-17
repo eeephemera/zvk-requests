@@ -4,299 +4,291 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/eeephemera/zvk-requests/db"
 	"github.com/eeephemera/zvk-requests/handlers"
+	"github.com/eeephemera/zvk-requests/middleware"
 	"github.com/eeephemera/zvk-requests/models"
 	"github.com/gorilla/mux"
 )
 
-// UpdateRequestByManagerHandler — обновление заявки менеджером
-func (h *RequestHandler) UpdateRequestByManagerHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	idStr := vars["id"]
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID")
+// Структура для ответа с пагинацией
+type PaginatedRequestsResponse struct {
+	Items []models.Request `json:"items"`
+	Total int64            `json:"total"` // Используем int64 для совместимости с COUNT(*)
+}
+
+// UpdateRequestStatusHandler - обновление статуса заявки менеджером
+func (h *RequestHandler) UpdateRequestStatusHandler(w http.ResponseWriter, r *http.Request) {
+	// 1. Получаем ID менеджера из контекста
+	managerID, ok := r.Context().Value(middleware.UserIDKey).(int)
+	if !ok {
+		handlers.RespondWithError(w, http.StatusUnauthorized, "Manager not authenticated")
 		return
 	}
 
-	// Проверяем существующую заявку
-	existingReq, err := h.Repo.GetRequestByIDWithoutUser(r.Context(), id)
+	// 2. Получаем ID заявки из URL
+	vars := mux.Vars(r)
+	requestIDStr := vars["id"]
+	requestID, err := strconv.Atoi(requestIDStr)
+	if err != nil || requestID <= 0 {
+		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID format")
+		return
+	}
+
+	// 3. Декодируем тело запроса (ожидаем JSON с новым статусом и комментарием)
+	var payload struct {
+		Status  string `json:"status"`
+		Comment string `json:"comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	// 4. Проверяем, что статус валиден (можно добавить больше проверок)
+	if payload.Status == "" {
+		handlers.RespondWithError(w, http.StatusBadRequest, "Status cannot be empty")
+		return
+	}
+	// TODO: Добавить валидацию на допустимые значения статуса
+
+	// 5. Проверяем права доступа менеджера к этой заявке
+	hasAccess, err := h.Repo.CheckManagerAccess(r.Context(), managerID, requestID)
+	if err != nil {
+		log.Printf("UpdateRequestStatusHandler: Error checking manager access for manager %d, request %d: %v", managerID, requestID, err)
+		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to check access rights")
+		return
+	}
+	if !hasAccess {
+		handlers.RespondWithError(w, http.StatusForbidden, "Manager does not have permission to modify this request")
+		return
+	}
+
+	// 6. Обновляем статус в репозитории
+	err = h.Repo.UpdateRequestStatus(r.Context(), requestID, payload.Status, payload.Comment)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			handlers.RespondWithError(w, http.StatusNotFound, "Request not found")
 			return
 		}
-		log.Printf("Manager update request error: %v", err)
-		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to fetch request")
+		log.Printf("UpdateRequestStatusHandler: Error updating status for request %d: %v", requestID, err)
+		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to update request status")
 		return
 	}
 
-	// Логируем запрос для отладки
-	contentType := r.Header.Get("Content-Type")
-	log.Printf("Received request: Method=%s, Content-Type=%s, Headers=%v", r.Method, contentType, r.Header)
-	body, _ := io.ReadAll(r.Body)
-	log.Printf("Request body: %s", string(body))
-	r.Body = io.NopCloser(strings.NewReader(string(body))) // Восстанавливаем тело
-
-	var updatedReq *models.Request
-
-	if strings.Contains(strings.ToLower(contentType), "application/json") {
-		log.Printf("Processing as JSON")
-		var updateData struct {
-			Status string `json:"status"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
-			log.Printf("Failed to decode JSON: %v", err)
-			handlers.RespondWithError(w, http.StatusBadRequest, "Invalid JSON payload")
-			return
-		}
-
-		if updateData.Status == "" {
-			handlers.RespondWithError(w, http.StatusBadRequest, "Status is required")
-			return
-		}
-
-		updatedReq = &models.Request{
-			ID:                 id,
-			UserID:             existingReq.UserID,
-			INN:                existingReq.INN,
-			OrganizationName:   existingReq.OrganizationName,
-			ImplementationDate: existingReq.ImplementationDate,
-			FZType:             existingReq.FZType,
-			RegistryType:       existingReq.RegistryType,
-			Comment:            existingReq.Comment,
-			TZFile:             existingReq.TZFile,
-			Status:             updateData.Status,
-		}
-	} else if strings.Contains(strings.ToLower(contentType), "multipart/form-data") {
-		log.Printf("Processing as multipart/form-data")
-		err = r.ParseMultipartForm(10 << 20)
-		if err != nil {
-			log.Printf("Failed to parse multipart form: %v", err)
-			handlers.RespondWithError(w, http.StatusBadRequest, "Failed to parse form")
-			return
-		}
-
-		inn := r.FormValue("inn")
-		organizationName := r.FormValue("organization_name")
-		implementationDateStr := r.FormValue("implementation_date")
-		fzType := r.FormValue("fz_type")
-		comment := r.FormValue("comment")
-		registryType := r.FormValue("registry_type")
-		status := r.FormValue("status")
-
-		var implementationDate time.Time
-		if implementationDateStr != "" {
-			implementationDate, err = time.Parse("2006-01-02", implementationDateStr)
-			if err != nil {
-				handlers.RespondWithError(w, http.StatusBadRequest, "Invalid implementation date")
-				return
-			}
-		} else {
-			implementationDate = existingReq.ImplementationDate
-		}
-
-		var tzFile []byte
-		file, _, err := r.FormFile("tz_file")
-		if err == nil {
-			defer file.Close()
-			tzFile, err = io.ReadAll(file)
-			if err != nil {
-				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to read file")
-				return
-			}
-		} else if !errors.Is(err, http.ErrMissingFile) {
-			handlers.RespondWithError(w, http.StatusBadRequest, "Failed to get file")
-			return
-		}
-		if tzFile == nil {
-			tzFile = existingReq.TZFile
-		}
-
-		updatedReq = &models.Request{
-			ID:                 id,
-			UserID:             existingReq.UserID,
-			INN:                inn,
-			OrganizationName:   organizationName,
-			ImplementationDate: implementationDate,
-			FZType:             fzType,
-			RegistryType:       registryType,
-			Comment:            comment,
-			TZFile:             tzFile,
-			Status:             status,
-		}
-	} else {
-		log.Printf("Unsupported Content-Type: %s", contentType)
-		handlers.RespondWithError(w, http.StatusUnsupportedMediaType, "Unsupported Content-Type: "+contentType)
-		return
-	}
-
-	// Сохраняем изменения
-	if err := h.Repo.UpdateRequestWithoutUser(r.Context(), updatedReq); err != nil {
-		log.Printf("Manager update request error: %v", err)
-		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to update request")
-		return
-	}
-
-	log.Printf("Request updated successfully: ID=%d, Status=%s", id, updatedReq.Status)
-	w.Header().Set("Content-Type", "application/json")
+	// 7. Отправляем успешный ответ (можно вернуть обновленную заявку, если нужно)
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(updatedReq)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Request status updated successfully"})
 }
 
-func (h *RequestHandler) GetAllRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	requests, err := h.Repo.GetAllRequests(r.Context(), 100, 0) // Лимит и офсет можно настроить
+// ListManagerRequestsHandler - получение списка заявок для менеджера (пагинация, фильтры, сортировка)
+func (h *RequestHandler) ListManagerRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	managerID, ok := r.Context().Value(middleware.UserIDKey).(int)
+	if !ok {
+		handlers.RespondWithError(w, http.StatusUnauthorized, "Manager not authenticated")
+		return
+	}
+
+	// Получаем параметры пагинации, фильтрации и сортировки из query string
+	pageStr := r.URL.Query().Get("page")
+	limitStr := r.URL.Query().Get("limit")
+	statusFilter := r.URL.Query().Get("status")
+	partnerFilter := r.URL.Query().Get("partner")
+	clientFilter := r.URL.Query().Get("client")
+	sortBy := r.URL.Query().Get("sortBy")
+	sortOrder := r.URL.Query().Get("sortOrder") // ASC или DESC
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 || limit > 100 {
+		limit = 10
+	}
+	offset := (page - 1) * limit
+
+	// Вызываем метод репозитория со всеми параметрами
+	requests, total, err := h.Repo.ListRequestsByManager(
+		r.Context(), managerID, limit, offset,
+		statusFilter, partnerFilter, clientFilter,
+		sortBy, sortOrder,
+	)
 	if err != nil {
-		log.Printf("Get all requests error: %v", err)
+		log.Printf("ListManagerRequestsHandler: Error fetching requests for manager %d: %v", managerID, err)
 		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to fetch requests")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(requests)
+	// Используем общую структуру PaginatedResponse (она должна быть определена в models или handlers)
+	// Предположим, она в models для консистентности
+	response := models.PaginatedResponse{
+		Items: requests, // ListRequestsByManager возвращает срез models.Request
+		Total: total,
+		Page:  page,
+		Limit: limit,
+	}
+
+	handlers.RespondWithJSON(w, http.StatusOK, response)
 }
 
-func (h *RequestHandler) DeleteRequestByManagerHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	idStr := vars["id"]
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID")
+// GetManagerRequestDetailsHandler - получение деталей заявки менеджером
+func (h *RequestHandler) GetManagerRequestDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	managerID, ok := r.Context().Value(middleware.UserIDKey).(int)
+	if !ok {
+		handlers.RespondWithError(w, http.StatusUnauthorized, "Manager not authenticated")
 		return
 	}
 
-	// Сначала проверяем, существует ли заявка
-	_, err = h.Repo.GetRequestByIDWithoutUser(r.Context(), id)
+	vars := mux.Vars(r)
+	requestIDStr := vars["id"]
+	requestID, err := strconv.Atoi(requestIDStr)
+	if err != nil || requestID <= 0 {
+		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID format")
+		return
+	}
+
+	// Проверяем права доступа менеджера к этой заявке
+	hasAccess, err := h.Repo.CheckManagerAccess(r.Context(), managerID, requestID)
+	if err != nil {
+		log.Printf("GetManagerRequestDetailsHandler: Error checking manager access for manager %d, request %d: %v", managerID, requestID, err)
+		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to check access rights")
+		return
+	}
+	if !hasAccess {
+		handlers.RespondWithError(w, http.StatusForbidden, "Manager does not have permission to view this request")
+		return
+	}
+
+	// Получаем детали заявки
+	req, err := h.Repo.GetRequestDetailsByID(r.Context(), requestID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			log.Printf("Request not found for deletion: ID=%d", id)
 			handlers.RespondWithError(w, http.StatusNotFound, "Request not found")
 			return
 		}
-		log.Printf("Error checking request existence for ID=%d: %v", id, err)
-		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to check request existence")
+		log.Printf("GetManagerRequestDetailsHandler: Error fetching details for request %d: %v", requestID, err)
+		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to fetch request details")
 		return
 	}
 
-	// Теперь пытаемся удалить
-	if err := h.Repo.DeleteRequestWithoutUser(r.Context(), id); err != nil {
-		// Проверяем дополнительно на случай, если запись была удалена между проверкой и удалением
-		if errors.Is(err, db.ErrNotFound) || strings.Contains(strings.ToLower(err.Error()), "not found") {
-			log.Printf("Request not found during deletion: ID=%d", id)
+	handlers.RespondWithJSON(w, http.StatusOK, req)
+}
+
+// DeleteManagerRequestHandler - удаление заявки менеджером
+func (h *RequestHandler) DeleteManagerRequestHandler(w http.ResponseWriter, r *http.Request) {
+	managerID, ok := r.Context().Value(middleware.UserIDKey).(int)
+	if !ok {
+		handlers.RespondWithError(w, http.StatusUnauthorized, "Manager not authenticated")
+		return
+	}
+
+	vars := mux.Vars(r)
+	requestIDStr := vars["id"]
+	requestID, err := strconv.Atoi(requestIDStr)
+	if err != nil || requestID <= 0 {
+		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID format")
+		return
+	}
+
+	// Проверяем права доступа
+	hasAccess, err := h.Repo.CheckManagerAccess(r.Context(), managerID, requestID)
+	if err != nil {
+		log.Printf("DeleteManagerRequestHandler: Error checking manager access for manager %d, request %d: %v", managerID, requestID, err)
+		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to check access rights")
+		return
+	}
+	if !hasAccess {
+		handlers.RespondWithError(w, http.StatusForbidden, "Manager does not have permission to delete this request")
+		return
+	}
+
+	// Удаляем заявку
+	err = h.Repo.DeleteRequest(r.Context(), requestID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
 			handlers.RespondWithError(w, http.StatusNotFound, "Request not found")
 			return
 		}
-
-		// Логируем детальную информацию об ошибке
-		log.Printf("Delete request error for ID=%d: %v", id, err)
-
-		// Проверяем на нарушение ограничения внешнего ключа
-		if strings.Contains(err.Error(), "foreign key constraint") {
-			handlers.RespondWithError(w, http.StatusConflict, "Cannot delete request: it is referenced by other records")
-			return
-		}
-
+		log.Printf("DeleteManagerRequestHandler: Error deleting request %d: %v", requestID, err)
 		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to delete request")
 		return
 	}
 
-	log.Printf("Request successfully deleted: ID=%d", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *RequestHandler) DownloadTZFileHandler(w http.ResponseWriter, r *http.Request) {
+// DownloadRequestHandler - скачивание файла ТЗ (доступно и пользователю, и менеджеру с проверкой прав)
+func (h *RequestHandler) DownloadRequestHandler(w http.ResponseWriter, r *http.Request) {
+	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
+	if !ok {
+		handlers.RespondWithError(w, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+	role, _ := r.Context().Value(middleware.RoleKey).(string)
+
 	vars := mux.Vars(r)
-	idStr := vars["id"]
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID")
+	requestIDStr := vars["id"]
+	requestID, err := strconv.Atoi(requestIDStr)
+	if err != nil || requestID <= 0 {
+		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID format")
 		return
 	}
 
-	req, err := h.Repo.GetRequestByIDWithoutUser(r.Context(), id)
+	// Получаем детали заявки, чтобы проверить права и получить файл
+	req, err := h.Repo.GetRequestDetailsByID(r.Context(), requestID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			handlers.RespondWithError(w, http.StatusNotFound, "Request not found")
 			return
 		}
-		log.Printf("Fetch request error: %v", err)
-		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to fetch request")
+		log.Printf("DownloadRequestHandler: Error fetching details for request %d: %v", requestID, err)
+		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to fetch request details")
 		return
 	}
 
-	if req.TZFile == nil {
-		handlers.RespondWithError(w, http.StatusNotFound, "TZ file not found")
-		return
-	}
-
-	// Определяем тип файла по его содержимому
-	fileType := http.DetectContentType(req.TZFile)
-
-	// Устанавливаем имя файла с расширением в зависимости от типа
-	filename := fmt.Sprintf("tz_file_%d", id)
-
-	// Добавляем расширение в зависимости от типа файла
-	switch fileType {
-	case "application/pdf":
-		filename += ".pdf"
-	case "image/jpeg":
-		filename += ".jpg"
-	case "image/png":
-		filename += ".png"
-	case "application/msword":
-		filename += ".doc"
-	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-		filename += ".docx"
-	case "application/vnd.ms-excel":
-		filename += ".xls"
-	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-		filename += ".xlsx"
-	default:
-		filename += ".bin" // Бинарный файл по умолчанию
-	}
-
-	// Устанавливаем заголовки для скачивания
-	w.Header().Set("Content-Type", fileType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(req.TZFile)))
-
-	// Логируем информацию о скачивании
-	log.Printf("Downloading file for request ID=%d, type=%s, filename=%s", id, fileType, filename)
-
-	// Отправляем файл
-	w.Write(req.TZFile)
-}
-
-func (h *RequestHandler) GetRequestByIDHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	idStr := vars["id"]
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID")
-		return
-	}
-
-	req, err := h.Repo.GetRequestByIDWithoutUser(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			handlers.RespondWithError(w, http.StatusNotFound, "Request not found")
+	// Проверка прав доступа
+	hasAccess := false
+	if role == string(models.RoleUser) && req.PartnerUserID == userID {
+		hasAccess = true
+	} else if role == string(models.RoleManager) {
+		// Проверяем доступ менеджера
+		managerHasAccess, checkErr := h.Repo.CheckManagerAccess(r.Context(), userID, requestID)
+		if checkErr != nil {
+			log.Printf("DownloadRequestHandler: Error checking manager access for manager %d, request %d: %v", userID, requestID, checkErr)
+			handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to check access rights")
 			return
 		}
-		log.Printf("Fetch request error: %v", err)
-		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to fetch request")
+		hasAccess = managerHasAccess
+	}
+
+	if !hasAccess {
+		handlers.RespondWithError(w, http.StatusForbidden, "You do not have permission to download this file")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	// Проверяем, есть ли файл
+	if req.OverallTZFile == nil || len(req.OverallTZFile) == 0 {
+		handlers.RespondWithError(w, http.StatusNotFound, "File not found for this request")
+		return
+	}
+
+	// Определяем имя файла (можно сделать умнее, если хранить имя в БД)
+	filename := fmt.Sprintf("tz_request_%d.file", requestID)
+	// Пытаемся определить Content-Type (простая реализация)
+	contentType := http.DetectContentType(req.OverallTZFile)
+
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(req.OverallTZFile)))
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(req)
+	_, err = w.Write(req.OverallTZFile)
+	if err != nil {
+		// Логируем ошибку, но статус уже отправлен
+		log.Printf("DownloadRequestHandler: Error writing file for request %d: %v", requestID, err)
+	}
 }

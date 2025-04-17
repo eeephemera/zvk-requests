@@ -31,8 +31,8 @@ interface ModalProps {
   onStatusUpdate: (id: number, newStatus: RequestStatus) => void;
 }
 
-// Сначала определите тип для возможных статусов
-type RequestStatus = "Новая" | "В обработке" | "Выполнена" | "Отменена";
+// Определяем тип для статуса заявки
+type RequestStatus = "На рассмотрении" | "В работе" | "Выполнена" | "Отклонена";
 
 const Modal = ({ isOpen, onClose, request, onDelete, onStatusUpdate }: ModalProps) => {
   const [error] = useState("");
@@ -207,7 +207,7 @@ const Modal = ({ isOpen, onClose, request, onDelete, onStatusUpdate }: ModalProp
               {isUpdating ? (
                 <LoadingDots />
               ) : (
-                ['Новая', 'В обработке', 'Выполнена', 'Отменена'].map((s) => (
+                ['На рассмотрении', 'В работе', 'Выполнена', 'Отклонена'].map((s) => (
                   <button
                     key={s}
                     onClick={() => updateStatus(s as RequestStatus)}

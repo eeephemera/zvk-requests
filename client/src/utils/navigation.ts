@@ -1,10 +1,11 @@
 export const getHomepageForRole = (role: string | null): string => {
   switch (role) {
-    case "Менеджер":
+    case "MANAGER":
       return "/manager";
-    case "Пользователь":
-      return "/requests";
+    case "USER":
+      return "/my-requests";
     default:
+      console.warn(`getHomepageForRole: Unknown or null role "${role}", defaulting to /login`);
       return "/login";
   }
 }; 

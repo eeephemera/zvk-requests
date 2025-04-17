@@ -20,7 +20,7 @@ import (
 func main() {
 	// Загружаем переменные окружения
 	if err := godotenv.Load(); err != nil {
-		log.Fatal("Ошибка загрузки .env файла")
+		log.Println("Warning: .env file not found or error loading it")
 	}
 
 	// Проверяем наличие необходимых переменных окружения
@@ -55,9 +55,19 @@ func main() {
 		log.Fatal("Не удалось получить пул подключений к БД")
 	}
 
-	// Инициализируем обработчик заявок с репозиторием
+	// Инициализируем все репозитории
+	userRepo := db.NewUserRepository(pool)
+	partnerRepo := db.NewPartnerRepository(pool)
+	endClientRepo := db.NewEndClientRepository(pool)
+	productRepo := db.NewProductRepository(pool)
 	requestRepo := db.NewRequestRepository(pool)
-	requestHandler := &requests.RequestHandler{Repo: requestRepo}
+
+	// Инициализируем обработчики
+	requestHandler := requests.NewRequestHandler(requestRepo, userRepo, partnerRepo, endClientRepo, productRepo)
+	authHandler := &handlers.AuthHandler{
+		UserRepo:    userRepo,
+		PartnerRepo: partnerRepo,
+	}
 
 	// Создаем основной роутер
 	r := mux.NewRouter()
@@ -81,31 +91,33 @@ func main() {
 		})
 	})
 
-	// Публичные маршруты: регистрация и логин
+	// Публичные маршруты (используем функции из пакета handlers)
 	r.HandleFunc("/api/register", handlers.RegisterUser).Methods("POST")
 	r.HandleFunc("/api/login", handlers.LoginUser).Methods("POST")
+	r.HandleFunc("/api/logout", handlers.LogoutUser).Methods("POST")
 
-	// Защищенные маршруты: сначала проходит проверка JWT
+	// Защищенные маршруты
 	authRouter := r.PathPrefix("/api").Subrouter()
 	authRouter.Use(middleware.ValidateToken)
 
-	// --- Маршруты для пользователей (Пользователь) ---
-	userRouter := authRouter.PathPrefix("/requests").Subrouter()
-	userRouter.Use(middleware.RequireRole(string(models.RoleUser)))
-	userRouter.HandleFunc("", requestHandler.CreateRequestHandler).Methods("POST")
-	userRouter.HandleFunc("", requestHandler.GetRequestsByUserHandler).Methods("GET")
-	userRouter.HandleFunc("/{id}", requestHandler.UpdateRequestHandler).Methods("PUT")
-	userRouter.HandleFunc("/{id}", requestHandler.DeleteRequestHandler).Methods("DELETE")
-	authRouter.HandleFunc("/me", handlers.Me).Methods("GET", "OPTIONS")
+	authRouter.HandleFunc("/me", authHandler.Me).Methods("GET", "OPTIONS")
+	authRouter.HandleFunc("/refresh", handlers.RefreshToken).Methods("POST", "OPTIONS")
 
-	// --- Маршруты для менеджеров (Менеджер) ---
-	managerRouter := authRouter.PathPrefix("/manager/requests").Subrouter()
-	managerRouter.Use(middleware.RequireRole(string(models.RoleManager)))
-	managerRouter.HandleFunc("", requestHandler.GetAllRequestsHandler).Methods("GET")
-	managerRouter.HandleFunc("/{id}", requestHandler.UpdateRequestByManagerHandler).Methods("PUT")
-	managerRouter.HandleFunc("/{id}", requestHandler.DeleteRequestByManagerHandler).Methods("DELETE")
-	managerRouter.HandleFunc("/{id}/file", requestHandler.DownloadTZFileHandler).Methods("GET")
-	managerRouter.HandleFunc("/{id}", requestHandler.GetRequestByIDHandler).Methods("GET")
+	// --- Маршруты для пользователей (USER) ---
+	userReqRouter := authRouter.PathPrefix("/requests").Subrouter()
+	userReqRouter.Use(middleware.RequireRole(string(models.RoleUser)))
+	userReqRouter.HandleFunc("", requestHandler.CreateRequestHandlerNew).Methods("POST")
+	userReqRouter.HandleFunc("/my", requestHandler.ListMyRequestsHandler).Methods("GET")
+	userReqRouter.HandleFunc("/my/{id:[0-9]+}", requestHandler.GetMyRequestDetailsHandler).Methods("GET")
+	userReqRouter.HandleFunc("/download/{id:[0-9]+}", requestHandler.DownloadRequestHandler).Methods("GET")
+
+	// --- Маршруты для менеджеров (MANAGER) ---
+	managerReqRouter := authRouter.PathPrefix("/manager/requests").Subrouter()
+	managerReqRouter.Use(middleware.RequireRole(string(models.RoleManager)))
+	managerReqRouter.HandleFunc("", requestHandler.ListManagerRequestsHandler).Methods("GET")
+	managerReqRouter.HandleFunc("/{id:[0-9]+}", requestHandler.GetManagerRequestDetailsHandler).Methods("GET")
+	managerReqRouter.HandleFunc("/{id:[0-9]+}/status", requestHandler.UpdateRequestStatusHandler).Methods("PUT")
+	managerReqRouter.HandleFunc("/{id:[0-9]+}", requestHandler.DeleteManagerRequestHandler).Methods("DELETE")
 
 	// Создаем HTTP сервер
 	server := &http.Server{
