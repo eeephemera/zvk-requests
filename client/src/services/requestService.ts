@@ -14,7 +14,7 @@ const REQUEST_TIMEOUT = 30000; // 30 seconds
 export interface DealRegistrationData {
   // --- Основные участники ---
   partnerId: number;          // Выбор партнера (обязательно)
-  distributorId?: number | null; // Выбор дистрибьютора (опционально?)
+  distributorId?: number | null; // Выбор дистрибьютора (опционально)
   
   // --- Конечный клиент ---
   endClientId?: number | null;   // ID найденного клиента
@@ -23,27 +23,28 @@ export interface DealRegistrationData {
   endClientCity?: string;        // Город (для создания)
   endClientFullAddress?: string; // Полный адрес (для создания)
   endClientContactDetails?: string; // Контакты (для создания)
+  endClientDetailsOverride?: string; // Дополнительные сведения о клиенте
 
-  // --- Продукт/Спецификация (одна позиция) ---
-  productId?: number | null;         // ID выбранного продукта (опционально, если кастомный)
+  // --- Продукт/Спецификация ---
+  productId?: number | null;     // ID выбранного продукта
   customItemSku?: string;        // Артикул кастомного продукта
   customItemName?: string;       // Название кастомного продукта
   customItemDescription?: string;// Описание кастомного продукта
-  quantity?: number | null;        // Количество (для кастомного или стандартного?)
-  unitPrice?: number | null;       // Цена за ед. (для кастомного?) 
-  // total_price будет вычисляться на бэкенде?
+  quantity?: number | null;      // Количество
+  unitPrice?: number | null;     // Цена за единицу
+  // total_price вычисляется на бэкенде
 
   // --- Параметры сделки ---
-  dealDescription: string;           // Описание сути сделки (обязательно)
-  estimatedValue?: number | null;    // Оценочная стоимость (опционально)
-  estimatedCloseDate?: string | null;// Ожидаемая дата закрытия (опционально, строка ГГГГ-ММ-ДД)
-  fzLawType?: string;                // Тип ФЗ (например, "223", "44", "Коммерческий", "-")?
-  mptRegistryType?: string;          // Тип реестра (например, "Реестр", "Нереестр", "Неприменимо")?
-  partnerActivities?: string;        // Активности партнера (текст)
-  partnerContactOverride?: string;   // Контактное лицо партнера для этой сделки (текст)
+  dealDescription: string;           // Описание сути сделки (обязательно) - в БД: deal_state_description
+  estimatedValue?: number | null;    // Оценочная стоимость 
+  estimatedCloseDate?: string | null;// Ожидаемая дата закрытия (строка ГГГГ-ММ-ДД)
+  fzLawType?: string;                // Тип ФЗ (например, "223", "44", ...)
+  mptRegistryType?: string;          // Тип реестра МПТ
+  partnerActivities?: string;        // Активности партнера
+  partnerContactOverride?: string;   // Контактное лицо партнера для этой сделки
 
   // --- Вложение ---
-  attachmentFile?: File | null;    // ТЗ/Вложение (опционально)
+  attachmentFile?: File | null;    // ТЗ/Вложение - в БД: overall_tz_file
 }
 
 // Общий интерфейс для заявки (подходит и для проекта, и для сделки?)
@@ -100,12 +101,9 @@ export interface RequestItem {
 /**
  * Submits a new deal registration (User action).
  * Использует новый интерфейс DealRegistrationData.
- * TODO: Implement actual API call when the backend endpoint is ready.
- * TODO: Decide if using FormData or JSON (if file is optional/handled differently).
  * Throws ApiError on failure. Returns the created Request on success.
  */
 export async function submitDealRegistration(data: DealRegistrationData): Promise<Request> {
-  console.warn("submitDealRegistration: API call not implemented yet.");
   // Валидация для новой формы
   if (!data.partnerId || !data.dealDescription || (!data.endClientId && !data.endClientInn)) {
      throw new ApiError("Пожалуйста, заполните все обязательные поля (Партнер, Описание сделки, ИНН или ID конечного клиента).", 400);
@@ -114,167 +112,179 @@ export async function submitDealRegistration(data: DealRegistrationData): Promis
       throw new ApiError("Пожалуйста, укажите Наименование нового конечного клиента.", 400);
   }
 
-  // Определяем, как отправлять: FormData или JSON
-  // Если есть файл, то FormData предпочтительнее.
-  const useFormData = !!data.attachmentFile;
-  let body: FormData | string;
+  // Всегда используем FormData, как ожидает сервер
+  const formData = new FormData();
+  
+  // Создаем JSON-объект для поля request_data
+  const requestDataPayload: any = {
+    partner_id: data.partnerId,
+    deal_state_description: data.dealDescription,
+  };
+  
+  // Конечный клиент
+  if (data.endClientId) {
+    requestDataPayload.end_client_id = data.endClientId;
+  }
+  if (data.endClientInn) {
+    requestDataPayload.end_client_inn = data.endClientInn;
+  }
+  if (data.endClientName) {
+    requestDataPayload.end_client_name = data.endClientName;
+  }
+  if (data.endClientCity) {
+    requestDataPayload.end_client_city = data.endClientCity;
+  }
+  if (data.endClientFullAddress) {
+    requestDataPayload.end_client_full_address = data.endClientFullAddress;
+  }
+  if (data.endClientContactDetails) {
+    requestDataPayload.end_client_contact_details = data.endClientContactDetails;
+  }
+  if (data.endClientDetailsOverride) {
+    requestDataPayload.end_client_details_override = data.endClientDetailsOverride;
+  }
+  
+  // Продукт и параметры
+  if (data.productId) {
+    requestDataPayload.product_id = data.productId;
+  }
+  if (data.customItemSku) {
+    requestDataPayload.custom_item_sku = data.customItemSku;
+  }
+  if (data.customItemName) {
+    requestDataPayload.custom_item_name = data.customItemName;
+  }
+  if (data.customItemDescription) {
+    requestDataPayload.custom_item_description = data.customItemDescription;
+  }
+  if (data.quantity !== null && data.quantity !== undefined) {
+    requestDataPayload.quantity = data.quantity;
+  }
+  if (data.unitPrice !== null && data.unitPrice !== undefined) {
+    requestDataPayload.unit_price = data.unitPrice;
+  }
+  
+  // Параметры сделки
+  if (data.estimatedCloseDate) {
+    // Преобразуем дату из формата день.месяц.год в формат YYYY-MM-DD
+    try {
+      console.log("Исходная дата:", data.estimatedCloseDate);
+      
+      // Если дата уже в формате YYYY-MM-DD и корректна
+      if (/^\d{4}-\d{2}-\d{2}$/.test(data.estimatedCloseDate)) {
+        const [year, month, day] = data.estimatedCloseDate.split('-').map(Number);
+        if (year > 1900 && year < 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+          requestDataPayload.estimated_close_date = data.estimatedCloseDate;
+        } else {
+          throw new Error(`Invalid date components: ${data.estimatedCloseDate}`);
+        }
+      } 
+      // Если дата в формате ДД.ММ.ГГГГ
+      else if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(data.estimatedCloseDate)) {
+        const parts = data.estimatedCloseDate.split('.');
+        const day = parts[0].padStart(2, '0');
+        const month = parts[1].padStart(2, '0');
+        const year = parts[2];
+        
+        // Проверка на корректность компонентов даты
+        const yearNum = Number(year);
+        const monthNum = Number(month);
+        const dayNum = Number(day);
+        
+        if (yearNum > 1900 && yearNum < 2100 && monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+          requestDataPayload.estimated_close_date = `${year}-${month}-${day}`;
+        } else {
+          throw new Error(`Invalid date components: ${day}.${month}.${year}`);
+        }
+      }
+      // Обработка формата с неправильным годом (например, 29.03.123123)
+      else if (/^\d{1,2}\.\d{1,2}\.\d+$/.test(data.estimatedCloseDate)) {
+        const parts = data.estimatedCloseDate.split('.');
+        const day = parts[0].padStart(2, '0');
+        const month = parts[1].padStart(2, '0');
+        
+        // Исправляем неправильный год, берем только последние 4 цифры или дополняем до 4
+        let year = parts[2];
+        if (year.length > 4) {
+          year = year.substring(year.length - 4);
+        } else if (year.length < 4) {
+          year = year.padStart(4, '2'); // Дополняем до 4 цифр, начиная с 2
+        }
+        
+        // Проверка на корректность компонентов даты после коррекции
+        const yearNum = Number(year);
+        const monthNum = Number(month);
+        const dayNum = Number(day);
+        
+        if (yearNum > 1900 && yearNum < 2100 && monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+          requestDataPayload.estimated_close_date = `${year}-${month}-${day}`;
+          console.log("Исправленная дата:", requestDataPayload.estimated_close_date);
+        } else {
+          throw new Error(`Invalid date components after correction: ${day}.${month}.${year}`);
+        }
+      }
+      // Иначе пытаемся обработать как обычную дату
+      else {
+        const date = new Date(data.estimatedCloseDate);
+        if (isNaN(date.getTime())) {
+          throw new Error(`Invalid date format: ${data.estimatedCloseDate}`);
+        }
+        
+        // Получаем компоненты и проверяем их на корректность
+        const year = date.getFullYear();
+        const month = date.getMonth() + 1;
+        const day = date.getDate();
+        
+        if (year > 1900 && year < 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+          requestDataPayload.estimated_close_date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        } else {
+          throw new Error(`Invalid date components from Date object: ${date.toISOString()}`);
+        }
+      }
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      throw new ApiError("Неверный формат даты закрытия сделки. Используйте формат ДД.ММ.ГГГГ (например, 29.03.2023)", 400);
+    }
+  }
+  
+  if (data.fzLawType) {
+    requestDataPayload.fz_law_type = data.fzLawType;
+  }
+  if (data.mptRegistryType) {
+    requestDataPayload.mpt_registry_type = data.mptRegistryType;
+  }
+  if (data.partnerActivities) {
+    requestDataPayload.partner_activities = data.partnerActivities;
+  }
+  if (data.partnerContactOverride) {
+    requestDataPayload.partner_contact_override = data.partnerContactOverride;
+  }
+  if (data.distributorId) {
+    requestDataPayload.distributor_id = data.distributorId;
+  }
 
-  if (useFormData) {
-      const formData = new FormData();
-      formData.append("partner_id", data.partnerId.toString());
-      formData.append("deal_description", data.dealDescription);
-      if (data.endClientId) {
-          formData.append("end_client_id", data.endClientId.toString());
-      }
-      if (data.endClientInn) {
-          formData.append("end_client_inn", data.endClientInn);
-      }
-      if (data.endClientName) { // Отправляем только если создаем нового
-          formData.append("end_client_name", data.endClientName);
-      }
-       if (data.endClientCity) { // Отправляем только если создаем нового
-          formData.append("end_client_city", data.endClientCity);
-      }
-      if (data.endClientFullAddress) { // Отправляем только если создаем нового
-          formData.append("end_client_full_address", data.endClientFullAddress);
-      }
-      if (data.endClientContactDetails) { // Отправляем только если создаем нового
-          formData.append("end_client_contact_details", data.endClientContactDetails);
-      }
-      if (data.estimatedValue !== null && data.estimatedValue !== undefined) { // Проверяем на null и undefined
-          formData.append("estimated_value", data.estimatedValue.toString());
-      }
-      if (data.estimatedCloseDate) {
-          formData.append("estimated_close_date", data.estimatedCloseDate);
-      }
-      if (data.fzLawType) {
-          formData.append("fz_law_type", data.fzLawType);
-      }
-      if (data.mptRegistryType) {
-          formData.append("mpt_registry_type", data.mptRegistryType);
-      }
-      if (data.partnerActivities) {
-          formData.append("partner_activities", data.partnerActivities);
-      }
-      if (data.partnerContactOverride) {
-          formData.append("partner_contact_override", data.partnerContactOverride);
-      }
-      if (data.productId) {
-          formData.append("product_id", data.productId.toString());
-      }
-      if (data.customItemSku) {
-          formData.append("custom_item_sku", data.customItemSku);
-      }
-      if (data.customItemName) {
-          formData.append("custom_item_name", data.customItemName);
-      }
-      if (data.customItemDescription) {
-          formData.append("custom_item_description", data.customItemDescription);
-      }
-      if (data.quantity !== null && data.quantity !== undefined) {
-          formData.append("quantity", data.quantity.toString());
-      }
-      if (data.unitPrice !== null && data.unitPrice !== undefined) {
-          formData.append("unit_price", data.unitPrice.toString());
-      }
-      if (data.attachmentFile) {
-          formData.append("attachment_file", data.attachmentFile);
-      }
-      body = formData;
-    } else {
-      // Отправка как JSON
-      const payload: any = {
-          partner_id: data.partnerId,
-          deal_description: data.dealDescription,
-      };
-      if (data.endClientId) {
-           payload.end_client_id = data.endClientId;
-      }
-       if (data.endClientInn) {
-           payload.end_client_inn = data.endClientInn;
-      }
-       if (data.endClientName) { // Отправляем только если создаем нового
-           payload.end_client_name = data.endClientName;
-      }
-      if (data.endClientCity) { // Отправляем только если создаем нового
-           payload.end_client_city = data.endClientCity;
-      }
-       if (data.endClientFullAddress) { // Отправляем только если создаем нового
-           payload.end_client_full_address = data.endClientFullAddress;
-      }
-       if (data.endClientContactDetails) { // Отправляем только если создаем нового
-           payload.end_client_contact_details = data.endClientContactDetails;
-      }
-       if (data.estimatedValue !== null && data.estimatedValue !== undefined) { // Проверяем на null и undefined
-           payload.estimated_value = data.estimatedValue;
-      }
-      if (data.estimatedCloseDate) {
-          payload.estimated_close_date = data.estimatedCloseDate;
-      }
-      if (data.fzLawType) {
-          payload.fz_law_type = data.fzLawType;
-      }
-      if (data.mptRegistryType) {
-          payload.mpt_registry_type = data.mptRegistryType;
-      }
-      if (data.partnerActivities) {
-          payload.partner_activities = data.partnerActivities;
-      }
-      if (data.partnerContactOverride) {
-          payload.partner_contact_override = data.partnerContactOverride;
-      }
-      if (data.productId) {
-          payload.product_id = data.productId;
-      }
-      if (data.customItemSku) {
-          payload.custom_item_sku = data.customItemSku;
-      }
-      if (data.customItemName) {
-          payload.custom_item_name = data.customItemName;
-      }
-      if (data.customItemDescription) {
-          payload.custom_item_description = data.customItemDescription;
-      }
-      if (data.quantity !== null && data.quantity !== undefined) {
-          payload.quantity = data.quantity;
-      }
-      if (data.unitPrice !== null && data.unitPrice !== undefined) {
-          payload.unit_price = data.unitPrice;
-      }
-      body = JSON.stringify(payload);
+  // Добавляем JSON в один параметр формы, как ожидает сервер
+  formData.append('request_data', JSON.stringify(requestDataPayload));
+  
+  // Файл, если есть
+  if (data.attachmentFile) {
+    formData.append('overall_tz_file', data.attachmentFile);
   }
 
   try {
-    // TODO: Уточнить эндпоинт для регистрации сделок. Может быть тот же /api/requests?
-    // Бэкенд должен будет определить тип запроса по наличию partner_id/product_id.
-    // const createdRequest = await apiFetch<Request>('/api/requests', {
-    //   method: 'POST',
-    //   body: body,
-    //   // Если отправляем JSON, нужен заголовок
-    //   headers: useFormData ? undefined : { 'Content-Type': 'application/json' },
-    // });
-    // return createdRequest;
-
-    // Моковый ответ
-    await new Promise(resolve => setTimeout(resolve, 800));
-    console.log("Mock submitting deal registration with data:", data);
-    const mockId = Math.floor(Math.random() * 1000) + 500;
-    // Возвращаем моковый объект Request
-    return {
-      id: mockId,
-      user_id: 1, // Пример ID пользователя
-      partner_id: data.partnerId,
-      end_client_id: data.endClientId ?? undefined,
-      deal_description: data.dealDescription,
-      estimated_value: data.estimatedValue === null ? undefined : data.estimatedValue,
-      status: "На рассмотрении", // Начальный статус
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
+    console.log("Sending request as FormData with request_data field");
+    
+    // Отправляем запрос на сервер
+    const createdRequest = await apiFetch<Request>('/api/requests', {
+      method: 'POST',
+      body: formData,
+      // FormData автоматически установит правильный Content-Type
+    });
+    return createdRequest;
   } catch (err) {
-    console.error("User: Error submitting deal registration:", err);
-      throw err;
+    // Логируем ошибку и перебрасываем её
+    console.error("Error submitting deal registration:", err);
+    throw err;
   }
 }
 
@@ -290,65 +300,80 @@ export async function getUserRequests(page: number = 1, limit: number = 10): Pro
 
   try {
     // User endpoint for getting their requests (projects and/or deals)
-    return await apiFetch<PaginatedResponse<Request>>(`/api/requests/my?${params.toString()}`); // Используем /my эндпоинт
+    const response = await apiFetch<PaginatedResponse<Request>>(`/api/requests/my?${params.toString()}`);
+    
+    // Проверяем, что в ответе есть данные и они соответствуют ожидаемой структуре
+    if (response && response.items) {
+      // Преобразуем ответ для совместимости с клиентским интерфейсом
+      response.items = response.items.map(req => {
+        // Правильное формирование связанных объектов
+        return {
+          ...req,
+          // Добавляем информацию о партнере, если есть partner_id
+          partner: req.partner || (req.partner_id ? { 
+            id: req.partner_id, 
+            name: req.partner_name || `Партнер #${req.partner_id}`,
+            created_at: '',
+            updated_at: ''
+          } : undefined),
+          
+          // Добавляем информацию о продукте, если есть product_id
+          product: req.product || (req.product_id ? {
+            id: req.product_id,
+            name: req.product_name || `Продукт #${req.product_id}`,
+            sku: req.product_sku || '',
+            item_type: req.product_item_type || '',
+            unit_price: req.product_unit_price || 0,
+            description: req.product_description || '',
+            created_at: '',
+            updated_at: ''
+          } : undefined),
+          
+          // Добавляем информацию о конечном клиенте, если есть end_client_id
+          end_client: req.end_client || (req.end_client_id ? {
+            id: req.end_client_id,
+            name: req.end_client_name || `Клиент #${req.end_client_id}`,
+            inn: req.end_client_inn || '',
+            created_at: '',
+            updated_at: ''
+          } : undefined)
+        };
+      });
+    }
+    
+    return response;
   } catch (err) {
     console.error(`User: Error fetching requests (page: ${page}, limit: ${limit}):`, err);
-        throw err;
+    throw err;
   }
 }
 
 /**
  * Fetches the details of a specific request (project or deal) for the current user.
- * TODO: Implement actual API call when the backend endpoint is ready.
  * Throws ApiError on failure. Returns the detailed Request on success.
  */
 export async function getRequestDetails(id: number): Promise<Request> {
-    console.warn(`getRequestDetails(${id}): API call not implemented yet.`);
-    // TODO: Обновить моковые данные или реализовать реальный вызов
-    // return await apiFetch<Request>(`/api/requests/my/${id}`);
-
-    // Обновленный моковый ответ (только для сделок)
-    await new Promise(resolve => setTimeout(resolve, 700));
-    const baseRequest: Partial<Request> = {
-        id: id,
-        user_id: 1,
-        status: ['На рассмотрении', 'В работе', 'Выполнена'][id % 3],
-        created_at: new Date(Date.now() - 86400000 * (id % 5)).toISOString(),
-        updated_at: new Date().toISOString(),
-    };
-
-    // Теперь все заявки - это "сделки"
-    return {
-        ...baseRequest,
-        partner_id: 101 + (id % 3),
-        end_client_id: 201 + (id % 2),
-        deal_description: 'Описание сделки номер ' + id + '. Очень важная сделка.',
-        estimated_value: 100000 * (id % 5 + 1),
-        partner: { id: 101 + (id % 3), name: `Партнер ${101 + (id % 3)}`, created_at: '', updated_at: ''}, 
-        end_client: { id: 201 + (id % 2), name: `Конечный Клиент ${201 + (id % 2)}`, inn: `ИНН-${201 + (id % 2)}`, created_at: '', updated_at: ''},
-        status: baseRequest.status ?? 'На рассмотрении',
-        created_at: baseRequest.created_at ?? '',
-        updated_at: baseRequest.updated_at ?? '',
-    } as Request;
+  try {
+    // API-запрос для получения подробной информации о заявке
+    return await apiFetch<Request>(`/api/requests/my/${id}`);
+  } catch (err) {
+    console.error(`Error fetching request details for ID ${id}:`, err);
+    throw err;
+  }
 }
 
 /**
  * Downloads the attachment file associated with a specific request for the current user.
- * TODO: Implement actual API call when the backend endpoint is ready.
  * Throws ApiError on failure. Returns { blob: Blob, filename: string } on success.
  */
 export async function downloadRequestFile(id: number): Promise<{ blob: Blob; filename: string }> {
-    console.warn(`downloadRequestFile(${id}): API call not implemented yet.`);
-    // return await fetchBlobWithFilename(`/api/requests/download/${id}`);
-
-    // Моковый ответ
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    // Имя файла теперь всегда attachment_...
-    const filename = `attachment_${id}.docx`; 
-    const content = `Это моковое содержимое файла для заявки ${id}.\nИмя файла: ${filename}\nТип: Сделка`;    
-    const blob = new Blob([content], { type: 'text/plain' });
-
-    return { blob, filename };
+  try {
+    // Скачивание файла через fetchBlobWithFilename
+    return await fetchBlobWithFilename(`/api/requests/${id}/download`);
+  } catch (err) {
+    console.error(`Error downloading file for request ${id}:`, err);
+    throw err;
+  }
 }
 
 // --- Functions moved to managerRequestService.ts or draftService.ts ---

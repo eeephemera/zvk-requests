@@ -9,7 +9,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 
 import { getPartners, Partner } from '@/services/partnerService';
-import { getProducts, Product } from '@/services/productService';
 import { findEndClientByINN, EndClient } from '@/services/endClientService';
 import { getCurrentUser, User } from '@/services/userService';
 import { 
@@ -22,10 +21,35 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 
 // Тип для данных формы, используемый react-hook-form
 // Он соответствует тому, что возвращает input type=file (FileList | null)
-// Исключаем attachmentFile из сервисного типа и добавляем поле с FileList
-// Убираем productId и добавляем productInput
-type DealRegistrationFormData = Omit<RequestServiceDealRegistrationData, 'attachmentFile' | 'productId'> & {
-    productInput?: string; // Новое текстовое поле для продукта
+type DealRegistrationFormData = {
+    // Основные участники
+    partnerId: number;
+    distributorId?: number | null;
+    
+    // Конечный клиент
+    endClientId?: number | null;
+    endClientInn?: string;
+    endClientName?: string;
+    endClientCity?: string;
+    endClientFullAddress?: string;
+    endClientContactDetails?: string;
+    endClientDetailsOverride?: string;
+
+    // Спецификация (request_items)
+    productId?: number | null;
+    custom_item_sku?: string;
+    custom_item_description?: string;
+    unit_price?: number | null;
+
+    // Параметры сделки
+    dealStateDescription: string;
+    estimatedCloseDate?: string | null;
+    fzLawType?: string;
+    mptRegistryType?: string;
+    partnerActivities?: string;
+    partnerContactOverride?: string;
+
+    // Вложение
     attachmentFile?: FileList | null;
 };
 
@@ -66,12 +90,6 @@ export default function DealRegistrationPage() {
   const { data: partners, isLoading: isLoadingPartners, error: partnersError } = useQuery<Partner[], ApiError>({
     queryKey: ['partners'],
     queryFn: getPartners,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const { data: products, isLoading: isLoadingProducts, error: productsError } = useQuery<Product[], ApiError>({
-    queryKey: ['products'],
-    queryFn: getProducts,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -235,46 +253,49 @@ export default function DealRegistrationPage() {
     setFormError(null); // Сбрасываем ошибки перед новой попыткой
     setFormSuccess(null);
     
+    // Проверка на наличие привязки к партнеру
+    if (!currentUser || !currentUser.partner?.id) {
+      setFormError("Ваш аккаунт не привязан к компании-партнеру. Обратитесь к администратору.");
+      return;
+    }
+    
     const fileList = formData.attachmentFile; 
     const actualAttachmentFile: File | null = fileList && fileList.length > 0 ? fileList[0] : null;
     
-    // Подготовка данных для отправки в сервис, включая все новые поля
+    // Подготовка данных для отправки в сервис
     const preparedDataForService: RequestServiceDealRegistrationData = {
         // --- Основные участники ---
-        partnerId: formData.partnerId, 
-        distributorId: formData.distributorId || null, // Добавлено. || null, если не выбрано
+        partnerId: formData.partnerId || currentUser.partner.id, // Используем ID партнера из профиля пользователя, если не указан в форме
+        distributorId: formData.distributorId || null,
         
         // --- Конечный клиент ---
-        endClientId: formData.endClientId, // ID найденного клиента
-        endClientInn: formData.endClientInn, // ИНН (для поиска/создания)
-        endClientName: formData.endClientName, // Имя (для создания)
-        endClientCity: formData.endClientCity, // Город (для создания)
-        endClientFullAddress: formData.endClientFullAddress || undefined, // Добавлено
-        endClientContactDetails: formData.endClientContactDetails || undefined, // Добавлено
+        endClientId: formData.endClientId, 
+        endClientInn: formData.endClientInn,
+        endClientName: formData.endClientName,
+        endClientCity: formData.endClientCity,
+        endClientFullAddress: formData.endClientFullAddress || undefined,
+        endClientContactDetails: formData.endClientContactDetails || undefined,
+        endClientDetailsOverride: formData.endClientDetailsOverride || undefined,
 
-        // Убираем обращение к formData.productId, устанавливаем просто null
-        productId: null, 
-        customItemSku: formData.productInput === 'Продукт по ТЗ' ? (formData.customItemSku || undefined) : undefined, 
-        customItemName: formData.productInput === 'Продукт по ТЗ' ? formData.customItemName : formData.productInput, // Если не по ТЗ, используем введенное значение как имя
-        customItemDescription: formData.productInput === 'Продукт по ТЗ' ? (formData.customItemDescription || undefined) : undefined, 
-        quantity: formData.productInput === 'Продукт по ТЗ' ? (formData.quantity || null) : null, // Количество только для ТЗ
-        unitPrice: formData.productInput === 'Продукт по ТЗ' ? (formData.unitPrice || null) : null, // Цена только для ТЗ
+        // --- Спецификация ---
+        productId: formData.productId || null,
+        customItemSku: formData.custom_item_sku || undefined,
+        customItemName: undefined,
+        customItemDescription: formData.custom_item_description || undefined,
+        quantity: null,
+        unitPrice: formData.unit_price || null,
 
         // --- Параметры сделки ---
-        dealDescription: formData.dealDescription, // Описание сути сделки (обязательно)
-        estimatedValue: formData.estimatedValue || null, // Оценочная стоимость
-        estimatedCloseDate: formData.estimatedCloseDate || null, // Добавлено
-        fzLawType: formData.fzLawType || undefined, // Добавлено
-        mptRegistryType: formData.mptRegistryType || undefined, 
-        partnerActivities: formData.partnerActivities || undefined, 
+        dealDescription: formData.dealStateDescription, // Переименовано в соответствии с API
+        estimatedCloseDate: formData.estimatedCloseDate || null,
+        fzLawType: formData.fzLawType || undefined,
+        mptRegistryType: formData.mptRegistryType || undefined,
+        partnerActivities: formData.partnerActivities || undefined,
+        partnerContactOverride: formData.partnerContactOverride || undefined,
 
         // --- Вложение ---
-        attachmentFile: actualAttachmentFile, // Файл
+        attachmentFile: actualAttachmentFile,
     };
-
-    // Удаляем пустые/null/undefined значения, чтобы не передавать лишнего?
-    // Например, если не выбрали productId, не отправлять `productId: null`
-    // Это зависит от требований бэкенда. Пока оставим как есть.
 
     console.log("Calling mutation with Prepared Data:", preparedDataForService);
     
@@ -292,7 +313,7 @@ export default function DealRegistrationPage() {
     }
   };
 
-  if (isLoadingPartners || isLoadingProducts || isLoadingUser) {
+  if (isLoadingPartners || isLoadingUser) {
     return (
       <ProtectedRoute allowedRoles={["USER"]} redirectIfNotAllowed={true}>
         <div className="min-h-screen flex flex-col bg-discord-background">
@@ -306,7 +327,7 @@ export default function DealRegistrationPage() {
     );
   }
 
-  if (partnersError || productsError || userError) {
+  if (partnersError || userError) {
     return (
       <ProtectedRoute allowedRoles={["USER"]} redirectIfNotAllowed={true}>
         <div className="min-h-screen flex flex-col bg-discord-background">
@@ -318,7 +339,7 @@ export default function DealRegistrationPage() {
                    Не удалось загрузить необходимые данные для формы (партнеры, продукты или информация о пользователе).
                  </p>
                  <p className="text-xs text-discord-text-muted">
-                   {partnersError?.message || productsError?.message || userError?.message || "Неизвестная ошибка"}
+                   {partnersError?.message || userError?.message || "Неизвестная ошибка"}
                  </p>
              </div>
           </div>
@@ -358,28 +379,53 @@ export default function DealRegistrationPage() {
             )}
 
             <form className="space-y-5" onSubmit={handleSubmit(onSubmit)}>
-                {/* --- 0. Информация об отправителе (текущий пользователь) --- */}
-                <div className="border border-discord-border p-4 rounded-md bg-discord-darker space-y-2">
-                   <h3 className="text-lg font-semibold text-discord-text mb-2">Отправитель заявки</h3>
-                   {currentUser ? (
-                     <>
-                       <p className="text-sm text-discord-text-secondary">
-                         <span className="font-medium text-discord-text-muted">ФИО:</span> {currentUser.name || 'Не указано'}
-                       </p>
-                       <p className="text-sm text-discord-text-secondary">
-                         <span className="font-medium text-discord-text-muted">Email:</span> {currentUser.email || 'Не указан'}
-                       </p>
-                       <p className="text-sm text-discord-text-secondary">
-                         <span className="font-medium text-discord-text-muted">Телефон:</span> {currentUser.phone || 'Не указан'}
-                       </p>
-                       <p className="text-sm text-discord-text-secondary">
-                         <span className="font-medium text-discord-text-muted">Компания:</span> {currentUser.partner?.name || 'Не привязан к компании'}
-                       </p>
-                     </>
-                   ) : (
-                     <p className="text-sm text-discord-text-muted">Информация о пользователе не загружена.</p>
-                   )}
-                 </div>
+                {/* --- 1. Информация о партнере --- */}
+                <div className="border border-discord-border p-4 rounded-md bg-discord-darker space-y-5">
+                  <h3 className="text-lg font-semibold text-discord-text mb-3">Информация о партнере</h3>
+                  
+                  {/* Отображаем информацию о текущем пользователе и его компании (партнере) */}
+                  <div>
+                    {currentUser ? (
+                      <div className="space-y-3">
+                        <div className="mb-3">
+                          <h4 className="text-sm font-semibold text-discord-text-muted mb-1">Компания-партнер:</h4>
+                          <p className="text-discord-text font-medium">
+                            {currentUser.partner?.name || 'Не привязан к компании'}
+                          </p>
+                          
+                          {/* Скрытое поле для partnerId */}
+                          <input
+                            type="hidden"
+                            {...register("partnerId", { 
+                              required: true,
+                              value: currentUser.partner?.id || undefined,
+                              valueAsNumber: true 
+                            })}
+                          />
+                          
+                          {!currentUser.partner?.id && (
+                            <p className="text-discord-danger text-xs mt-1">
+                              Ваш аккаунт не привязан к компании-партнеру. Обратитесь к администратору.
+                            </p>
+                          )}
+                        </div>
+                        
+                        <h4 className="text-sm font-semibold text-discord-text-muted mb-1">Информация об отправителе:</h4>
+                        <p className="text-sm text-discord-text-secondary">
+                          <span className="font-medium text-discord-text-muted">ФИО:</span> {currentUser.name || 'Не указано'}
+                        </p>
+                        <p className="text-sm text-discord-text-secondary">
+                          <span className="font-medium text-discord-text-muted">Email:</span> {currentUser.email || 'Не указан'}
+                        </p>
+                        <p className="text-sm text-discord-text-secondary">
+                          <span className="font-medium text-discord-text-muted">Телефон:</span> {currentUser.phone || 'Не указан'}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-discord-text-muted">Информация о пользователе не загружена.</p>
+                    )}
+                  </div>
+                </div>
 
                 {/* --- 2. Описание сделки --- */}
                 <div className="border border-discord-border p-4 rounded-md bg-discord-darker space-y-5">
@@ -387,199 +433,71 @@ export default function DealRegistrationPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     {/* Левая колонка описания */}
                     <div className="space-y-5">
-                      {/* --- Продукт (теперь текстовое поле) --- */}
+                      {/* SKU кастомного товара */}
                       <div>
-                        <label htmlFor="productInput" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                          Продукт / Услуга <span className="text-discord-danger">*</span>
+                        <label htmlFor="custom_item_sku" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                          Артикул/Код (опционально)
                         </label>
                         <input
-                          id="productInput"
+                          id="custom_item_sku"
                           type="text"
-                          placeholder='Наименование продукта или "Продукт по ТЗ"'
-                          className={`discord-input w-full ${formErrors.productInput ? 'border-discord-danger' : ''}`}
-                          {...register("productInput", { 
-                            required: 'Укажите наименование продукта или введите \'Продукт по ТЗ\'' 
+                          placeholder="Артикул продукта"
+                          className={`discord-input w-full ${formErrors.custom_item_sku ? 'border-discord-danger' : ''}`}
+                          {...register("custom_item_sku")}
+                        />
+                        {formErrors.custom_item_sku && <p className="text-discord-danger text-xs mt-1">{formErrors.custom_item_sku.message}</p>}
+                      </div>
+
+                      {/* Описание кастомного товара */}
+                      <div>
+                        <label htmlFor="custom_item_description" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                          Описание (Пример: "ПК - 4 шт.", "Ноутбук - 20 шт.")
+                        </label>
+                        <textarea
+                          id="custom_item_description"
+                          placeholder="Подробное описание, требования..."
+                          className={`discord-input w-full resize-none ${formErrors.custom_item_description ? 'border-discord-danger' : ''}`}
+                          rows={3}
+                          {...register("custom_item_description")}
+                        />
+                        {formErrors.custom_item_description && <p className="text-discord-danger text-xs mt-1">{formErrors.custom_item_description.message}</p>}
+                      </div>
+
+                      {/* Цена за единицу */}
+                      <div>
+                        <label htmlFor="unit_price" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                          Цена за ед. (₽, опционально)
+                        </label>
+                        <input
+                          id="unit_price"
+                          type="number"
+                          placeholder="Цена за единицу"
+                          className={`discord-input w-full ${formErrors.unit_price ? 'border-discord-danger' : ''}`}
+                          {...register("unit_price", { 
+                            valueAsNumber: true,
+                            min: { value: 0, message: "Цена не может быть отрицательной" }
                           })}
                         />
-                        {formErrors.productInput && <p className="text-discord-danger text-xs mt-1">{formErrors.productInput.message}</p>}
-                        <p className="text-xs text-discord-text-muted mt-1">Если продукт требует описания по ТЗ, введите "Продукт по ТЗ".</p>
-                      </div>
-
-                      {/* --- Условно отображаемые поля для кастомного продукта/спецификации --- */} 
-                      {watch('productInput') === 'Продукт по ТЗ' && (
-                          <div className="border border-discord-border border-opacity-50 p-3 rounded-md space-y-3 bg-discord-darker/50 animate-fade-in">
-                              {/* Артикул кастомный */} 
-                              <div>
-                                 <label htmlFor="customItemSku" className="block text-discord-text-secondary text-xs mb-1 font-medium">
-                                     Артикул/Код (опционально)
-                                 </label>
-                                 <input
-                                     id="customItemSku"
-                                     type="text"
-                                     placeholder="Ваш артикул"
-                                     className={`discord-input w-full text-sm ${formErrors.customItemSku ? 'border-discord-danger' : ''}`}
-                                     {...register("customItemSku")}
-                                 />
-                                 {formErrors.customItemSku && <p className="text-discord-danger text-xs mt-1">{formErrors.customItemSku.message}</p>}
-                             </div>
-                              {/* Название кастомное */} 
-                              <div>
-                                 <label htmlFor="customItemName" className="block text-discord-text-secondary text-xs mb-1 font-medium">
-                                     Наименование продукта/услуги <span className="text-discord-danger">*</span>
-                                 </label>
-                                 <input
-                                     id="customItemName"
-                                     type="text"
-                                     placeholder="Название согласно ТЗ"
-                                     className={`discord-input w-full text-sm ${formErrors.customItemName ? 'border-discord-danger' : ''}`}
-                                     {...register("customItemName", {
-                                         // Валидация: обязательно, если выбран 'Продукт по ТЗ'
-                                         required: watch('productInput') === 'Продукт по ТЗ' ? 'Наименование обязательно для продукта по ТЗ' : false
-                                     })}
-                                 />
-                                 {formErrors.customItemName && <p className="text-discord-danger text-xs mt-1">{formErrors.customItemName.message}</p>}
-                             </div>
-                             {/* Описание кастомное */} 
-                             <div>
-                                 <label htmlFor="customItemDescription" className="block text-discord-text-secondary text-xs mb-1 font-medium">
-                                     Описание/Спецификация <span className="text-discord-danger">*</span>
-                                 </label>
-                                 <textarea
-                                     id="customItemDescription"
-                                     placeholder="Подробное описание, требования..."
-                                     className={`discord-input w-full resize-none text-sm ${formErrors.customItemDescription ? 'border-discord-danger' : ''}`}
-                                     rows={3}
-                                     {...register("customItemDescription", {
-                                         // Валидация: обязательно, если выбран 'Продукт по ТЗ'
-                                          required: watch('productInput') === 'Продукт по ТЗ' ? 'Описание обязательно для продукта по ТЗ' : false
-                                     })}
-                                 />
-                                 {formErrors.customItemDescription && <p className="text-discord-danger text-xs mt-1">{formErrors.customItemDescription.message}</p>}
-                             </div>
-                              {/* Количество */} 
-                              <div>
-                                 <label htmlFor="quantity" className="block text-discord-text-secondary text-xs mb-1 font-medium">
-                                     Количество (шт/ед.) <span className="text-discord-danger">*</span>
-                                 </label>
-                                 <input
-                                     id="quantity"
-                                     type="number"
-                                     placeholder="1"
-                                     className={`discord-input w-full text-sm ${formErrors.quantity ? 'border-discord-danger' : ''}`}
-                                     {...register("quantity", {
-                                          valueAsNumber: true, 
-                                          min: { value: 1, message: "Количество должно быть больше 0" },
-                                          // Валидация: обязательно, если выбран 'Продукт по ТЗ'
-                                          validate: (value) => {
-                                             const productInputVal = watch('productInput');
-                                             if (productInputVal !== 'Продукт по ТЗ') return true; // Не требуется, если не 'Продукт по ТЗ'
-                                             
-                                             const quantityValue = typeof value === 'number' && !isNaN(value) ? value : null;
-                                             if (quantityValue === null || quantityValue <= 0) {
-                                                 return 'Количество (больше 0) обязательно для продукта по ТЗ';
-                                             }
-                                             return true;
-                                         }
-                                     })}
-                                 />
-                                   {formErrors.quantity && <p className="text-discord-danger text-xs mt-1">{formErrors.quantity.message}</p>}
-                              </div>
-                              {/* Цена за единицу */} 
-                              <div>
-                                 <label htmlFor="unitPrice" className="block text-discord-text-secondary text-xs mb-1 font-medium">
-                                     Цена за ед. (₽, опционально)
-                                 </label>
-                                 <input
-                                     id="unitPrice"
-                                     type="number"
-                                     placeholder="Цена за единицу"
-                                     className={`discord-input w-full text-sm ${formErrors.unitPrice ? 'border-discord-danger' : ''}`}
-                                     {...register("unitPrice", { valueAsNumber: true, min: { value: 0, message: "Цена не может быть отрицательной" } })}
-                                 />
-                                  {formErrors.unitPrice && <p className="text-discord-danger text-xs mt-1">{formErrors.unitPrice.message}</p>}
-                              </div>
-                           </div>
-                      )} {/* Конец условного блока */} 
-
-                      {/* Оценочная стоимость (общая) */} 
-                      <div>
-                          <label htmlFor="estimatedValue" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Оценочная стоимость (₽, опционально)
-                          </label>
-                          <input
-                            id="estimatedValue"
-                            type="number"
-                            placeholder="Введите сумму сделки"
-                            className={`discord-input w-full ${formErrors.estimatedValue ? 'border-discord-danger' : ''}`}
-                            {...register("estimatedValue", { valueAsNumber: true, min: { value: 0, message: "Сумма не может быть отрицательной" } })}
-                          />
-                           {formErrors.estimatedValue && <p className="text-discord-danger text-xs mt-1">{formErrors.estimatedValue.message}</p>}
-                      </div>
-                      {/* Тип ФЗ */}
-                      <div>
-                        <label htmlFor="fzLawType" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                          Тип ФЗ (опционально)
-                        </label>
-                        <select
-                          id="fzLawType"
-                          className="discord-input w-full appearance-none pr-8"
-                          style={{backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23686b74' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")", backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em"}}
-                          {...register("fzLawType")}
-                        >
-                          <option value="">Не выбрано</option>
-                          <option value="223">223 ФЗ</option>
-                          <option value="44">44 ФЗ</option>
-                          <option value="Коммерческий">Коммерческий</option>
-                          <option value="-">Неприменимо</option>
-                        </select>
-                      </div>
-                      {/* Тип реестра МПТ */}
-                      <div>
-                        <label htmlFor="mptRegistryType" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                          Тип реестра МПТ (опционально)
-                        </label>
-                        <select
-                          id="mptRegistryType"
-                          className="discord-input w-full appearance-none pr-8"
-                          style={{backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23686b74' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")", backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em"}}
-                          {...register("mptRegistryType")}
-                        >
-                           <option value="">Не выбрано</option>
-                          <option value="Реестр">Реестр</option>
-                          <option value="Нереестр">Нереестр</option>
-                          <option value="Неприменимо">Неприменимо</option>
-                        </select>
-                      </div>
-                      {/* Ожидаемая дата закрытия */}
-                      <div>
-                          <label htmlFor="estimatedCloseDate" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Ожидаемая дата закрытия (опционально)
-                          </label>
-                          <input
-                            id="estimatedCloseDate"
-                            type="date"
-                            className={`discord-input w-full ${formErrors.estimatedCloseDate ? 'border-discord-danger' : ''}`}
-                            {...register("estimatedCloseDate")}
-                          />
-                           {formErrors.estimatedCloseDate && <p className="text-discord-danger text-xs mt-1">{formErrors.estimatedCloseDate.message}</p>}
+                        {formErrors.unit_price && <p className="text-discord-danger text-xs mt-1">{formErrors.unit_price.message}</p>}
                       </div>
                     </div>
                     {/* Правая колонка описания */}
                     <div className="space-y-5">
                        {/* Описание сделки */}
                         <div>
-                          <label htmlFor="dealDescription" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Описание сделки <span className="text-discord-danger">*</span>
+                          <label htmlFor="dealStateDescription" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                            Подробнее о сделке <span className="text-discord-danger">*</span>
                           </label>
                           <textarea
-                            id="dealDescription"
+                            id="dealStateDescription"
                             placeholder="Опишите суть сделки, потребности клиента..."
-                            className={`discord-input w-full resize-none ${formErrors.dealDescription ? 'border-discord-danger' : ''}`}
+                            className={`discord-input w-full resize-none ${formErrors.dealStateDescription ? 'border-discord-danger' : ''}`}
                             rows={6}
-                            {...register("dealDescription", { required: "Описание сделки обязательно" })}
+                            {...register("dealStateDescription", { required: "Описание сделки обязательно" })}
                           />
-                          {formErrors.dealDescription && <p className="text-discord-danger text-xs mt-1">{formErrors.dealDescription.message}</p>}
+                          {formErrors.dealStateDescription && <p className="text-discord-danger text-xs mt-1">{formErrors.dealStateDescription.message}</p>}
                         </div>
+                        
                         {/* Активности партнера */} 
                         <div>
                            <label htmlFor="partnerActivities" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
@@ -594,26 +512,54 @@ export default function DealRegistrationPage() {
                            />
                            {formErrors.partnerActivities && <p className="text-discord-danger text-xs mt-1">{formErrors.partnerActivities.message}</p>}
                         </div>
-                        {/* Дистрибьютор */} 
+                        
+                        {/* Тип ФЗ */}
                         <div>
-                          <label htmlFor="distributorId" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Дистрибьютор (опционально)
+                          <label htmlFor="fzLawType" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                            Тип ФЗ (опционально)
                           </label>
                           <select
-                            id="distributorId"
-                            className={`discord-input w-full appearance-none pr-8 ${formErrors.distributorId ? 'border-discord-danger' : ''}`}
+                            id="fzLawType"
+                            className="discord-input w-full appearance-none pr-8"
                             style={{backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23686b74' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")", backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em"}}
-                            {...register("distributorId", { valueAsNumber: true })}
+                            {...register("fzLawType")}
                           >
-                            <option value="">-- Не выбран --</option>
-                            {/* Используем тот же список партнеров */} 
-                            {partners?.map((partner) => (
-                              <option key={partner.id} value={partner.id}>
-                                {partner.name}
-                              </option>
-                            ))}
+                            <option value="">Не выбрано</option>
+                            <option value="223">223 ФЗ</option>
+                            <option value="44">44 ФЗ</option>
+                            <option value="Коммерческий">Коммерческий</option>
                           </select>
-                          {formErrors.distributorId && <p className="text-discord-danger text-xs mt-1">{formErrors.distributorId.message}</p>}
+                        </div>
+                        
+                        {/* Тип реестра МПТ */}
+                        <div>
+                          <label htmlFor="mptRegistryType" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                            Тип реестра МПТ (опционально)
+                          </label>
+                          <select
+                            id="mptRegistryType"
+                            className="discord-input w-full appearance-none pr-8"
+                            style={{backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23686b74' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")", backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em"}}
+                            {...register("mptRegistryType")}
+                          >
+                             <option value="">Не выбрано</option>
+                            <option value="Реестр">Реестр</option>
+                            <option value="Нереестр">Нереестр</option>
+                          </select>
+                        </div>
+                        
+                        {/* Ожидаемая дата закрытия */}
+                        <div>
+                          <label htmlFor="estimatedCloseDate" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
+                            Ожидаемая дата закрытия сделки
+                          </label>
+                          <input
+                            id="estimatedCloseDate"
+                            type="date"
+                            className={`discord-input w-full ${formErrors.estimatedCloseDate ? 'border-discord-danger' : ''}`}
+                            {...register("estimatedCloseDate")}
+                          />
+                           {formErrors.estimatedCloseDate && <p className="text-discord-danger text-xs mt-1">{formErrors.estimatedCloseDate.message}</p>}
                         </div>
                     </div>
                   </div>
@@ -676,26 +622,13 @@ export default function DealRegistrationPage() {
                         />
                         {formErrors.endClientName && <p className="text-discord-danger text-xs mt-1">{formErrors.endClientName.message}</p>}
                       </div>
-                      <div>
-                        <label htmlFor="endClientCity" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                          Город (опционально)
-                        </label>
-                        <input
-                          id="endClientCity"
-                          type="text"
-                          placeholder="Город местонахождения"
-                          className={`discord-input w-full ${formErrors.endClientCity ? 'border-discord-danger' : ''}`}
-                          {...register("endClientCity")}
-                           disabled={!!foundEndClient || isSearchingInn}
-                        />
-                      </div>
                     </>
 
                     {/* Новые поля */} 
                     {/* Полный адрес */} 
                     <div>
                         <label htmlFor="endClientFullAddress" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Полный адрес (опционально)
+                            Полный адрес
                         </label>
                         <input
                           id="endClientFullAddress"

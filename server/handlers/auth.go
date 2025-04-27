@@ -270,18 +270,26 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	// 2. Создаем структуру для ответа
 	type UserResponse struct {
 		ID      int             `json:"id"`
-		Name    string          `json:"name"`
+		Name    string          `json:"name"` // Возвращаем строку, даже если в user указатель
 		Email   string          `json:"email"`
 		Phone   string          `json:"phone"`
 		Role    models.UserRole `json:"role"`
-		Partner *models.Partner `json:"partner,omitempty"` // Используем указатель из models
+		Partner *models.Partner `json:"partner,omitempty"`
+	}
+
+	// Функция-хелпер для безопасного разыменования указателя на строку
+	ptrToString := func(s *string) string {
+		if s != nil {
+			return *s
+		}
+		return "" // Возвращаем пустую строку, если указатель nil
 	}
 
 	response := UserResponse{
 		ID:    user.ID,
-		Name:  user.Name,
-		Email: user.Email,
-		Phone: user.Phone,
+		Name:  ptrToString(user.Name),  // Используем хелпер
+		Email: ptrToString(user.Email), // Используем хелпер
+		Phone: ptrToString(user.Phone), // Используем хелпер
 		Role:  user.Role,
 	}
 

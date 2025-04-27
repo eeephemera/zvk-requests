@@ -68,6 +68,9 @@ func main() {
 		UserRepo:    userRepo,
 		PartnerRepo: partnerRepo,
 	}
+	partnerHandler := handlers.NewPartnerHandler(partnerRepo)
+	productHandler := handlers.NewProductHandler(productRepo)
+	endClientHandler := handlers.NewEndClientHandler(endClientRepo)
 
 	// Создаем основной роутер
 	r := mux.NewRouter()
@@ -102,6 +105,11 @@ func main() {
 
 	authRouter.HandleFunc("/me", authHandler.Me).Methods("GET", "OPTIONS")
 	authRouter.HandleFunc("/refresh", handlers.RefreshToken).Methods("POST", "OPTIONS")
+
+	// --- Новые маршруты для справочников ---
+	authRouter.HandleFunc("/partners", partnerHandler.ListPartnersHandler).Methods("GET", "OPTIONS")
+	authRouter.HandleFunc("/products", productHandler.ListProductsHandler).Methods("GET", "OPTIONS")
+	authRouter.HandleFunc("/end-clients/search", endClientHandler.SearchByINNHandler).Methods("GET", "OPTIONS")
 
 	// --- Маршруты для пользователей (USER) ---
 	userReqRouter := authRouter.PathPrefix("/requests").Subrouter()

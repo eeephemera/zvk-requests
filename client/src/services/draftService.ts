@@ -1,4 +1,4 @@
-import type { RequestData } from './requestService'; // Import type definition
+import { RequestData } from 'next/dist/server/web/types';
 
 const DRAFT_STORAGE_KEY = 'zvk_request_draft';
 

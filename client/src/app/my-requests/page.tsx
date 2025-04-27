@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getUserRequests, Request } from "@/services/requestService";
+import { getUserRequests, downloadRequestFile, Request } from "@/services/requestService";
 import Link from "next/link";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import RequestDetailsModal from "@/components/RequestDetailsModal";
@@ -86,6 +86,40 @@ export default function MyRequestsPage() {
       case "Выполнена": return "text-green-500";
       case "Отклонена": return "text-red-500";
       default: return "text-gray-500";
+    }
+  };
+
+  const [downloadingFile, setDownloadingFile] = useState<boolean>(false);
+  const [fileDownloadError, setFileDownloadError] = useState<string | null>(null);
+
+  // Обработчик скачивания файла
+  const handleDownloadFile = async (requestId: number) => {
+    if (downloadingFile) return;
+
+    setDownloadingFile(true);
+    setFileDownloadError(null);
+
+    try {
+      const { blob, filename } = await downloadRequestFile(requestId);
+      
+      // Создаём URL объекта и скачиваем его
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error downloading file:", error);
+      setFileDownloadError(
+        error instanceof ApiError 
+          ? error.message 
+          : "Не удалось скачать файл. Пожалуйста, попробуйте позже."
+      );
+    } finally {
+      setDownloadingFile(false);
     }
   };
 
@@ -240,11 +274,9 @@ export default function MyRequestsPage() {
             onClose={closeRequestDetails}
             request={selectedRequest}
             isLoadingDetails={false}
-            downloadingFile={false}
-            fileDownloadError={null}
-            onDownloadFile={(id: number) => {
-              // console.log("Download file action for request:", id); // Removed
-            }}
+            downloadingFile={downloadingFile}
+            fileDownloadError={fileDownloadError}
+            onDownloadFile={handleDownloadFile}
             formatDate={formatDate}
             getStatusColor={getStatusColor}
             isManager={false}

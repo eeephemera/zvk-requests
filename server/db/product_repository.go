@@ -48,9 +48,10 @@ func (repo *ProductRepository) GetProductByID(ctx context.Context, id int) (*mod
 		WHERE id = $1
 	`
 	var product models.Product
+	var unitPrice *float64 // т.к. unit_price может быть NULL
 	err := repo.pool.QueryRow(ctx, query, id).Scan(
 		&product.ID, &product.SKU, &product.Name, &product.Description,
-		&product.ItemType, &product.UnitPrice, &product.CreatedAt, &product.UpdatedAt,
+		&product.ItemType, &unitPrice, &product.CreatedAt, &product.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -59,6 +60,8 @@ func (repo *ProductRepository) GetProductByID(ctx context.Context, id int) (*mod
 		log.Printf("Error fetching product by ID %d: %v", id, err)
 		return nil, fmt.Errorf("failed to fetch product: %w", err)
 	}
+
+	product.UnitPrice = unitPrice
 	return &product, nil
 }
 
@@ -97,6 +100,39 @@ func (repo *ProductRepository) ListProducts(ctx context.Context) ([]models.Produ
 		return nil, fmt.Errorf("rows iteration error: %w", err)
 	}
 
+	return products, nil
+}
+
+// GetAllProducts возвращает список всех продуктов.
+func (repo *ProductRepository) GetAllProducts(ctx context.Context) ([]*models.Product, error) {
+	query := `
+		SELECT id, sku, name, description, item_type, unit_price, created_at, updated_at
+		FROM products
+		ORDER BY name ASC
+	`
+	rows, err := repo.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query products: %w", err)
+	}
+	defer rows.Close()
+
+	var products []*models.Product
+	for rows.Next() {
+		var product models.Product
+		var unitPrice *float64 // т.к. unit_price может быть NULL
+		err := rows.Scan(
+			&product.ID, &product.SKU, &product.Name, &product.Description,
+			&product.ItemType, &unitPrice, &product.CreatedAt, &product.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan product row: %w", err)
+		}
+		product.UnitPrice = unitPrice
+		products = append(products, &product)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating product rows: %w", err)
+	}
 	return products, nil
 }
 

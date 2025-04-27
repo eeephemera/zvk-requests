@@ -64,7 +64,6 @@ export default function RegisterPage() {
         throw new Error(message);
       }
 
-      const responseData = await res.json();
       setSuccess("Регистрация прошла успешно. Перенаправление на страницу входа...");
       setTimeout(() => router.push("/login"), 2000);
     } catch (err: unknown) {
