@@ -1,0 +1,96 @@
+version: '3.9'
+
+services:
+  # Клиентская часть (Next.js)
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8081
+    depends_on:
+      - server
+    networks:
+      - zvk-network
+
+  # Серверная часть (Go)
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      # Для продакшена использовать секрет Docker или переменную окружения хоста
+      - DB_PASSWORD=secure_password_here
+      - DB_NAME=zvk_requests
+      - DB_SSLMODE=disable
+      # Для продакшена использовать секрет Docker или переменную окружения хоста
+      - JWT_SECRET=secure_random_string_at_least_32_chars
+      - JWT_EXPIRATION=24h
+      - SERVER_PORT=8081
+      - APP_ENV=production
+      # Список разрешенных доменов для CORS
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,https://your-production-domain.com
+      - LOG_LEVEL=info
+    depends_on:
+      - postgres
+    networks:
+      - zvk-network
+    # Для продакшена настраиваем ограничения ресурсов
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # База данных PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    # Не публикуем порт БД наружу в продакшене
+    # В разработке можно раскомментировать
+    # ports:
+    #  - "5433:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      # Для продакшена использовать секрет Docker или переменную окружения хоста
+      - POSTGRES_PASSWORD=secure_password_here
+      - POSTGRES_DB=zvk_requests
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - zvk-network
+    # Для продакшена настраиваем ограничения ресурсов
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # Добавляем обратный прокси для продакшена
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - client
+      - server
+    networks:
+      - zvk-network
+
+networks:
+  zvk-network:
+    driver: bridge
+
+volumes:
+  postgres_data: 

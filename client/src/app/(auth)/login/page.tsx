@@ -1,15 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useForm, SubmitHandler } from "react-hook-form";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
+import { getHomepageForRole } from "@/utils/navigation";
+import { AuthResponse } from "@/context/AuthContext"; // Импортируем тип пользователя из контекста
+
+// Ключ для отслеживания попыток входа
+const LOGIN_ATTEMPTS_KEY = 'zvk_login_attempts';
+// Максимальное количество попыток автоматического редиректа
+const MAX_AUTO_REDIRECTS = 2;
 
 type FormInputs = {
   login: string;
   password: string;
+};
+
+// Определяем структуру ответа для LoginUser, которая включает данные пользователя
+// (согласовываем с бекендом)
+type LoginApiResponse = {
+  message: string;
+  user: AuthResponse; // Используем тип из AuthContext
 };
 
 const getFriendlyErrorMessage = (error: string, status?: number): string => {
@@ -25,15 +39,53 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [skipRedirect, setSkipRedirect] = useState(false);
   const router = useRouter();
-  const { checkAuth } = useAuth();
+  const searchParams = useSearchParams();
+  // Получаем функцию updateAuthState из контекста
+  const { isAuthenticated, userRole, updateAuthState } = useAuth(); 
+  
+  // Проверка и инкремент счетчика попыток редиректа
+  const shouldSkipRedirect = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    
+    try {
+      const attemptsData = localStorage.getItem(LOGIN_ATTEMPTS_KEY);
+      const attempts = attemptsData ? JSON.parse(attemptsData) : { count: 0, timestamp: Date.now() };
+      
+      // Сбрасываем счетчик, если прошло более 10 секунд с последней попытки
+      if (Date.now() - attempts.timestamp > 10000) {
+        localStorage.setItem(LOGIN_ATTEMPTS_KEY, JSON.stringify({ count: 1, timestamp: Date.now() }));
+        return false;
+      }
+      
+      // Если превышено максимальное количество попыток, пропускаем редирект
+      if (attempts.count >= MAX_AUTO_REDIRECTS) {
+        return true;
+      }
+      
+      // Инкрементируем счетчик попыток
+      localStorage.setItem(LOGIN_ATTEMPTS_KEY, 
+        JSON.stringify({ count: attempts.count + 1, timestamp: Date.now() }));
+      
+      return false;
+    } catch (error) {
+      return false;
+    }
+  };
+  
+  // Проверяем наличие бесконечного цикла редиректов при монтировании
+  useEffect(() => {
+    setSkipRedirect(shouldSkipRedirect());
+  }, []);
 
   const onSubmit: SubmitHandler<FormInputs> = async (data) => {
     setError("");
     setIsLoading(true);
+    console.log("Attempting login...");
 
     try {
-      const res = await fetch(process.env.NEXT_PUBLIC_API_URL + "/api/login", {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -50,30 +102,76 @@ export default function LoginPage() {
         throw new Error(message, { cause: res.status });
       }
 
-      const responseData = await res.json();
-      const userRole: string = responseData.role;
-
-      await checkAuth();
-
-      if (userRole === "MANAGER") {
-        router.push("/manager");
-      } else if (userRole === "USER") {
-        router.push("/my-requests");
-      } else {
-        console.error("Undefined user role after login:", userRole);
-        setError("Роль пользователя не определена. Обратитесь в поддержку.");
+      // Получаем данные пользователя напрямую из ответа
+      const responseData: LoginApiResponse = await res.json(); 
+      // ----- DEBUG LOG ----- 
+      console.log("Raw response from /api/login:", JSON.stringify(responseData, null, 2)); 
+      // ----- END DEBUG LOG ----- 
+      console.log("Login successful, received user data:", responseData.user);
+      
+      // Обновляем состояние авторизации в контексте
+      updateAuthState(responseData.user);
+      
+      // Получаем путь для редиректа из URL
+      const fromPath = searchParams.get('from');
+      console.log("Redirect path from URL:", fromPath);
+      
+      // Используем отдельную функцию для определения домашней страницы на основе роли
+      const defaultPath = getHomepageForRole(responseData.user.role);
+      console.log("Default path based on role:", defaultPath);
+      
+      // Определяем конечный путь редиректа
+      let returnTo = fromPath || defaultPath;
+      
+      // Корректируем неверные пути
+      if (returnTo === "/requests") {
+        returnTo = "/my-requests";
       }
+      
+      console.log("Final redirect path:", returnTo);
+
+      // Используем replace вместо push для избежания истории навигации
+      router.replace(returnTo);
+
     } catch (err: unknown) {
+      console.error("Login error:", err);
       if (err instanceof Error) {
         setError(getFriendlyErrorMessage(err.message, (err.cause as number) || undefined));
       } else {
         setError("Неизвестная ошибка");
       }
-      console.error("Ошибка входа:", err);
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Если мы обнаружили, что находимся в бесконечном цикле редиректов,
+  // показываем ссылки для ручной навигации вместо автоматического редиректа
+  if (skipRedirect && isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="bg-discord-card rounded-lg shadow-lg w-full max-w-md p-6">
+          <h1 className="text-2xl font-bold text-discord-text mb-6">
+            Обнаружен цикл перенаправлений
+          </h1>
+          <p className="text-discord-text-muted mb-4">
+            Система предотвратила бесконечное перенаправление. Перейдите на нужную страницу вручную:
+          </p>
+          <div className="space-y-4">
+            <a href="/my-requests" className="block w-full py-2 text-center bg-discord-button-primary text-white rounded-md hover:bg-opacity-80">
+              Страница запросов
+            </a>
+            <a href="/manager" className="block w-full py-2 text-center bg-discord-accent text-white rounded-md hover:bg-opacity-80">
+              Панель менеджера
+            </a>
+            <a href="/" className="block w-full py-2 text-center bg-discord-border text-discord-text rounded-md hover:bg-opacity-80">
+              Главная страница
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ProtectedRoute isPublicPage={true}>

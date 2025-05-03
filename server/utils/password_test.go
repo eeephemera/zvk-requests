@@ -104,5 +104,3 @@ func TestValidatePassword(t *testing.T) {
 	}
 }
 
-// TODO: Добавить тест для ValidatePassword (TestValidatePassword)
-// Проверить разные случаи: короткий пароль, без цифр, без букв, корректный и т.д.

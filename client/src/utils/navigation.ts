@@ -1,11 +1,21 @@
 export const getHomepageForRole = (role: string | null): string => {
-  switch (role) {
-    case "MANAGER":
-      return "/manager";
-    case "USER":
-      return "/my-requests";
-    default:
-      console.warn(`getHomepageForRole: Unknown or null role "${role}", defaulting to /login`);
-      return "/login";
+  if (!role) {
+    console.warn(`getHomepageForRole: Null role provided, defaulting to /login`);
+    return "/login";
   }
+  
+  // Normalize role to uppercase for consistent comparison
+  const normalizedRole = role.toUpperCase();
+  
+  // Handle both English and Russian role names
+  if (normalizedRole === "MANAGER" || normalizedRole === "МЕНЕДЖЕР") {
+    return "/manager";
+  }
+  
+  if (normalizedRole === "USER" || normalizedRole === "ПОЛЬЗОВАТЕЛЬ") {
+    return "/my-requests";
+  }
+  
+  console.warn(`getHomepageForRole: Unknown role "${role}", defaulting to /login`);
+  return "/login";
 }; 

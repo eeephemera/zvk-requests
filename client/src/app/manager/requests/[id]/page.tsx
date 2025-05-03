@@ -1,15 +1,16 @@
 import { redirect } from 'next/navigation';
 
-// Используем правильную типизацию для Next.js 15
-type Props = {
-  params: {
-    id: string;
-  }
+interface PageParams {
+  id: string;
 }
 
-// Экспортируем обычную функцию без async
-export default function Page(props: Props) {
-  const id = props.params.id;
-  // Используем redirect для серверного редиректа
-  redirect(`/manager?requestId=${id}`);
+export default async function Page({ 
+  params,
+  searchParams 
+}: { 
+  params: Promise<PageParams>;
+  searchParams?: { [key: string]: string | string[] | undefined };
+}) {
+  const { id } = await params;
+  return redirect(`/manager?requestId=${id}`);
 }

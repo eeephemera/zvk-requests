@@ -1,16 +1,18 @@
 import { RequestData } from 'next/dist/server/web/types';
+ import { apiClient } from './apiClient';
 
 const DRAFT_STORAGE_KEY = 'zvk_request_draft';
 
+interface DraftResponse {
+  path: string;
+}
+
 /**
  * Saves the current request form data as a draft in localStorage.
- * Excludes the File object.
  */
 export function saveDraft(data: Partial<RequestData>): void {
   try {
-    // Don't save the File object in localStorage
-    const { tzFile, ...restData } = data;
-    const draftData = JSON.stringify(restData);
+    const draftData = JSON.stringify(data);
     localStorage.setItem(DRAFT_STORAGE_KEY, draftData);
   } catch (error) {
     console.error("Failed to save draft to localStorage:", error);
@@ -20,9 +22,9 @@ export function saveDraft(data: Partial<RequestData>): void {
 
 /**
  * Loads the request draft from localStorage.
- * Returns the draft data (excluding the file) or null if no draft exists or fails.
+ * Returns the draft data or null if no draft exists or fails.
  */
-export function loadDraft(): Partial<Omit<RequestData, 'tzFile'>> | null {
+export function loadDraft(): Partial<RequestData> | null {
   // Ensure this code only runs on the client-side
   if (typeof window === 'undefined') {
     return null;
@@ -54,4 +56,15 @@ export function clearDraft(): void {
   } catch (error) {
       console.error("Failed to clear draft from localStorage:", error);
   }
-} 
+}
+
+/**
+ * Creates a draft file by uploading it to the server.
+ */
+export async function uploadDraft(tzFile: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', tzFile);
+
+  return apiClient.post<DraftResponse>('/api/drafts', formData)
+    .then((response: DraftResponse) => response.path);
+}

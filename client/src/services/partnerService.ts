@@ -1,4 +1,4 @@
-import { apiFetch, ApiError } from './apiClient';
+import { apiFetch } from './apiClient';
 
 // Интерфейс Partner на основе server/models/partner.go
 export interface Partner {
@@ -17,10 +17,5 @@ export interface Partner {
  * Throws ApiError on failure. Returns Partner[] on success.
  */
 export async function getPartners(): Promise<Partner[]> {
-  try {
-    return await apiFetch<Partner[]>('/api/partners');
-  } catch (err) {
-    console.error("Error fetching partners:", err);
-    throw err;
-  }
-} 
+  return apiFetch<Partner[]>('/api/partners');
+}

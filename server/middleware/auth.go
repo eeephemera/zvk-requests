@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/eeephemera/zvk-requests/models"
 	"github.com/golang-jwt/jwt/v5"
@@ -15,8 +16,10 @@ import (
 type contextKey string
 
 const (
-	UserIDKey contextKey = "userID"
-	RoleKey   contextKey = "role"
+	UserIDKey      contextKey = "userID"
+	RoleKey        contextKey = "role"
+	TokenIDKey     contextKey = "tokenID"     // Новый ключ для JWT ID
+	TokenIssuedKey contextKey = "tokenIssued" // Новый ключ для времени создания токена
 )
 
 // Глобальная переменная для хранения секрета
@@ -24,6 +27,9 @@ var jwtSecret []byte
 
 // Установить секретный ключ (вызывается из main.go)
 func SetJWTSecret(secret string) {
+	if secret == "" {
+		log.Fatal("JWT_SECRET не может быть пустым")
+	}
 	jwtSecret = []byte(secret)
 }
 
@@ -37,58 +43,107 @@ func ValidateToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("token")
 		if err != nil {
-			// Keep log for missing cookie if desired, or remove
-			// log.Println("ValidateToken: no cookie found:", err)
 			http.Error(w, "Authorization cookie is missing", http.StatusUnauthorized)
 			return
 		}
 
 		tokenString := cookie.Value
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+
+		// Добавляем проверку на минимальную длину, чтобы отсечь очевидно неверные токены
+		if len(tokenString) < 30 {
+			http.Error(w, "Invalid token format", http.StatusUnauthorized)
+			return
+		}
+
+		// Настройки парсера для дополнительной безопасности
+		parser := jwt.NewParser(jwt.WithValidMethods([]string{"HS256"}))
+
+		token, err := parser.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			// Проверка алгоритма подписи
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
 			return jwtSecret, nil
 		})
-		if err != nil || !token.Valid {
-			log.Printf("ValidateToken: token invalid: %v", err) // Keep log for invalid token
+
+		if err != nil {
+			log.Printf("ValidateToken: token invalid: %v", err)
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		if !token.Valid {
+			http.Error(w, "Token validation failed", http.StatusUnauthorized)
 			return
 		}
 
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			log.Println("ValidateToken: failed to parse claims") // Keep log for parsing failure
+			log.Println("ValidateToken: failed to parse claims")
 			http.Error(w, "Failed to parse token claims", http.StatusUnauthorized)
 			return
 		}
 
+		// Проверка на истечение времени токена (exp)
+		if exp, ok := claims["exp"].(float64); ok {
+			expTime := time.Unix(int64(exp), 0)
+			if time.Now().After(expTime) {
+				http.Error(w, "Token has expired", http.StatusUnauthorized)
+				return
+			}
+		} else {
+			http.Error(w, "Invalid expiration time in token", http.StatusUnauthorized)
+			return
+		}
+
+		// Проверка, что токен не использовался раньше установленного времени (iat, если есть)
+		if iat, ok := claims["iat"].(float64); ok {
+			issuedAt := time.Unix(int64(iat), 0)
+			// Проверка, что токен не из будущего (с погрешностью на разницу в часах серверов)
+			if issuedAt.After(time.Now().Add(5 * time.Minute)) {
+				http.Error(w, "Token issued in the future", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		// Извлечение ID пользователя
 		userID, ok := claims["id"].(float64)
 		if !ok {
-			// Keep log for invalid ID type if desired
-			// log.Println("ValidateToken: invalid id type in claims")
 			http.Error(w, "Invalid user ID in token", http.StatusUnauthorized)
 			return
 		}
 
+		// Извлечение роли
 		roleValue, ok := claims["role"].(string)
 		if !ok {
-			// Keep log for invalid role type if desired
-			// log.Println("ValidateToken: invalid role type in claims (expected string)")
 			http.Error(w, "Invalid user role format in token", http.StatusUnauthorized)
 			return
 		}
 
+		// Проверка, что роль имеет допустимое значение
 		if roleValue != string(models.RoleUser) && roleValue != string(models.RoleManager) {
-			// Keep log for unknown role value
-			// log.Println("ValidateToken: unknown role string:", roleValue)
 			http.Error(w, "Invalid user role value in token", http.StatusUnauthorized)
 			return
 		}
 
-		// console.log(`ValidateToken: token OK: userID=%d, role=%s`, userID, roleValue) // Removed log
+		// Извлечение JWT ID (jti) для возможного будущего blacklisting
+		var tokenID string
+		if jti, ok := claims["jti"].(string); ok {
+			tokenID = jti
+		}
+
+		// Создаем контекст с данными из токена
 		ctx := context.WithValue(r.Context(), UserIDKey, int(userID))
 		ctx = context.WithValue(ctx, RoleKey, roleValue)
+
+		// Добавляем дополнительные данные в контекст, если они есть в токене
+		if tokenID != "" {
+			ctx = context.WithValue(ctx, TokenIDKey, tokenID)
+		}
+		if iat, ok := claims["iat"].(float64); ok {
+			ctx = context.WithValue(ctx, TokenIssuedKey, time.Unix(int64(iat), 0))
+		}
+
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -99,8 +154,6 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			role, ok := r.Context().Value(RoleKey).(string)
 			if !ok {
-				// Keep log for missing role in context if desired
-				// log.Println("RequireRole: role not found in context or not a string")
 				http.Error(w, "User role not found", http.StatusForbidden)
 				return
 			}
@@ -116,8 +169,6 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 			if allowed {
 				next.ServeHTTP(w, r)
 			} else {
-				// Keep log for forbidden access if desired
-				// log.Printf("RequireRole: Forbidden access for role '%s'. Allowed: %v", role, allowedRoles)
 				http.Error(w, "Forbidden", http.StatusForbidden)
 			}
 		})

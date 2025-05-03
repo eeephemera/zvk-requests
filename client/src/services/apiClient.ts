@@ -1,174 +1,223 @@
-import { Request } from './requestService'; // May need adjustment after full refactor
-
-export const BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
-export const REQUEST_TIMEOUT = 30000; // 30 seconds
-
-/**
- * Custom Error class for API errors.
- */
 export class ApiError extends Error {
   status: number;
-  data: any; // Store additional error data if available
+  data?: unknown;
 
-  constructor(message: string, status: number, data: any = null) {
+  constructor(message: string, status: number, data?: unknown) {
     super(message);
-    this.name = 'ApiError';
     this.status = status;
     this.data = data;
-    // Maintain stack trace (useful for debugging)
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, ApiError);
-    }
+    this.name = 'ApiError';
   }
 }
 
-/**
- * Interface for paginated responses.
- */
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;
-  // Add other potential pagination fields from backend if needed (e.g., page, limit)
-  page?: number;
-  limit?: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
 }
 
+interface ApiResponse<T> {
+  data: T;
+  message?: string;
+}
 
-// --- Core API Fetch Logic ---
+interface ErrorResponse {
+  error: string;
+  status: number;
+  data?: unknown;
+}
 
-/**
- * Performs a fetch request to the API, handling common logic like:
- * - Prepending base URL
- * - Setting credentials mode
- * - Handling JSON parsing
- * - Throwing ApiError on non-ok responses
- * - Handling timeouts
- */
-export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+export interface BlobResponse {
+  blob: Blob;
+  filename: string;
+}
 
-  const url = `${BASE_URL}${endpoint}`;
-  console.log(`apiFetch: ${options.method || 'GET'} ${url}`); // Keep basic request log
+// Base API client configuration
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081';
+const REQUEST_TIMEOUT = 30000; // 30 seconds
 
+// Helper function to handle API errors
+function handleApiError(error: unknown): never {
+  if (error instanceof ApiError) {
+    throw error;
+  }
+
+  if (error instanceof Error) {
+    throw new ApiError(error.message, 500);
+  }
+
+  throw new ApiError('An unknown error occurred', 500);
+}
+
+// Helper function to check if the token has expired
+function isTokenExpired(token: string): boolean {
   try {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        // Default headers - can be overridden by options.headers
-        ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), // Don't set Content-Type for FormData
-        Accept: 'application/json',
-        ...options.headers,
-      },
-      credentials: 'include', // Send cookies
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      let errorData: any = null;
-      let errorMessage = `HTTP error ${response.status}: ${response.statusText}`;
-      try {
-        // Attempt to parse error response body for more details
-        errorData = await response.json();
-        errorMessage = errorData.error || errorData.message || errorMessage; // Use backend error message if available
-        console.error(`API Error ${response.status} on ${endpoint}:`, errorData);
-      } catch (parseError) {
-        // If response is not JSON or empty
-        console.error(`API Error ${response.status} on ${endpoint}: Could not parse error response.`);
-        // Fallback to status text if JSON parsing fails
-        errorMessage = response.statusText || `HTTP error ${response.status}`;
-      }
-      throw new ApiError(errorMessage, response.status, errorData);
-    }
-
-    // Handle successful responses
-    // Check for 204 No Content or if the method might not return a body
-    if (response.status === 204 || options.method === 'DELETE') {
-      // Return null or an appropriate value for void/no-content responses
-      // Using 'as T' here requires careful usage, ensure the caller expects null/void.
-      return null as T; 
-    }
-
-    // For other successful responses, parse JSON
-    return await response.json() as T;
-
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error instanceof ApiError) {
-      // Re-throw ApiError directly
-      throw error;
-    } else if (error instanceof Error && error.name === 'AbortError') {
-      // Handle timeout specifically
-      console.error(`API request timed out: ${endpoint}`);
-      throw new ApiError(`Превышен лимит ожидания (${REQUEST_TIMEOUT / 1000} сек.)`, 408);
-    } else {
-      // Handle network errors or other unexpected errors
-      console.error(`Network or unexpected error during API fetch to ${endpoint}:`, error);
-      throw new ApiError("Ошибка сети или непредвиденная ошибка. Проверьте подключение или попробуйте позже.", 503); // 503 Service Unavailable might be appropriate
-    }
+    const [, payload] = token.split('.');
+    const decodedPayload = JSON.parse(atob(payload));
+    const expirationTime = decodedPayload.exp * 1000; // Convert to milliseconds
+    return Date.now() >= expirationTime;
+  } catch {
+    return true;
   }
 }
 
-/**
- * Fetches a Blob from the API and attempts to extract the filename from
- * the Content-Disposition header.
- * Throws ApiError on failure.
- */
-export async function fetchBlobWithFilename(endpoint: string, options: RequestInit = {}): Promise<{ blob: Blob; filename: string }> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+// Function to parse error responses
+function parseError(response: Response, errorData: ErrorResponse): never {
+  const status = response.status;
+  const message = errorData.error || 'An unknown error occurred';
+  throw new ApiError(message, status, errorData.data);
+}
 
-  const url = `${BASE_URL}${endpoint}`;
-  console.log(`fetchBlob: ${options.method || 'GET'} ${url}`); // Keep basic request log
+// Helper function to fetch a blob with filename from content-disposition
+export async function fetchBlobWithFilename(endpoint: string): Promise<BlobResponse> {
+  const token = localStorage.getItem('token');
+  const headers: HeadersInit = {};
+  
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${BASE_URL}${endpoint}`, { headers });
+
+  if (!response.ok) {
+    throw new ApiError('Failed to download file', response.status);
+  }
+
+  const contentDisposition = response.headers.get('content-disposition');
+  const filenameMatch = contentDisposition?.match(/filename="?(.+?)"?$/);
+  const filename = filenameMatch ? filenameMatch[1] : 'download';
+
+  const blob = await response.blob();
+  return { blob, filename };
+}
+
+// Generic fetch function that other services can use
+export async function apiFetch<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const headers = new Headers(options.headers);
+  
+  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const config: RequestInit = {
+    ...options,
+    headers,
+    credentials: 'include',
+  };
 
   try {
-    const response = await fetch(url, {
-      ...options,
-      credentials: 'include',
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
+    const response = await fetch(`${BASE_URL}${endpoint}`, config);
+    const contentType = response.headers.get('content-type');
 
     if (!response.ok) {
-      let errorData: any = null;
-      let errorMessage = `HTTP error ${response.status}`; 
-      try {
-        errorData = await response.json();
-        errorMessage = errorData.error || errorData.message || errorMessage;
-      } catch { /* Ignore if error response isn't JSON */ }
-      throw new ApiError(errorMessage, response.status, errorData);
+      const errorData = contentType?.includes('application/json') 
+        ? await response.json()
+        : { error: 'Ошибка сервера' };
+      
+      throw new ApiError(
+        errorData.error || 'Ошибка сервера',
+        response.status,
+        errorData
+      );
     }
 
-    const blob = await response.blob();
-    const disposition = response.headers.get('Content-Disposition');
-    let filename = 'downloaded_file'; // Default filename
-    if (disposition && disposition.includes('filename=')) {
-      const filenameMatch = disposition.match(/filename\*?="?([^;"\n]*)"?/i);
-      if (filenameMatch && filenameMatch[1]) {
-        try {
-            // Decode URI component and replace underscores with spaces (common practice)
-            filename = decodeURIComponent(filenameMatch[1].replace(/\+/g, ' '));
-        } catch (e) {
-            console.error("Error decoding filename:", e);
-            filename = filenameMatch[1]; // Use raw filename if decoding fails
-        }
-      }
+    if (contentType?.includes('application/json')) {
+      const data = await response.json();
+      // Возвращаем данные напрямую, без обертки
+      return data as T;
     }
 
-    return { blob, filename };
-
+    return response as unknown as T;
   } catch (error) {
-    clearTimeout(timeoutId);
-     if (error instanceof ApiError) {
-      throw error;
-    } else if (error instanceof Error && error.name === 'AbortError') {
-      throw new ApiError(`Превышен лимит ожидания (${REQUEST_TIMEOUT / 1000} сек.)`, 408);
-    } else {
-      console.error(`Network or unexpected error during blob fetch from ${endpoint}:`, error);
-      throw new ApiError("Ошибка сети при скачивании файла.", 503);
+    return handleApiError(error);
+  }
+}
+
+// Main API client class
+export class ApiClient {
+  private baseUrl: string;
+  private timeout: number;
+
+  constructor(baseUrl = BASE_URL, timeout = REQUEST_TIMEOUT) {
+    this.baseUrl = baseUrl;
+    this.timeout = timeout;
+  }
+
+  // Generic request method with type safety
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    try {
+      const response = await fetch(this.baseUrl + endpoint, {
+        ...options,
+        signal: AbortSignal.timeout(this.timeout),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => null);
+        throw new ApiError(
+          error?.message || `HTTP error! status: ${response.status}`,
+          response.status,
+          error
+        );
+      }
+      
+      return await response.json();
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        error instanceof Error ? error.message : 'An unknown error occurred',
+        500
+      );
     }
   }
-} 
+
+  // Typed GET method
+  async get<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    return this.request<T>(endpoint, { ...options, method: 'GET' });
+  }
+
+  // Typed POST method with proper type handling for the body
+  async post<T, U = unknown>(
+    endpoint: string,
+    body?: U,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const config: RequestInit = {
+      ...options,
+      method: 'POST',
+      body: body instanceof FormData ? body : JSON.stringify(body),
+    };
+    return this.request<T>(endpoint, config);
+  }
+
+  // Typed PUT method
+  async put<T, U = unknown>(
+    endpoint: string,
+    body?: U,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const config: RequestInit = {
+      ...options,
+      method: 'PUT',
+      body: body instanceof FormData ? body : JSON.stringify(body),
+    };
+    return this.request<T>(endpoint, config);
+  }
+
+  // Typed DELETE method
+  async delete<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    return this.request<T>(endpoint, { ...options, method: 'DELETE' });
+  }
+}
+
+// Export a singleton instance
+export const apiClient = new ApiClient();

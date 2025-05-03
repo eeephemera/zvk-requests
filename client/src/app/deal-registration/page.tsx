@@ -8,7 +8,6 @@ import Header from '@/components/Header';
 import Link from 'next/link';
 import Image from 'next/image';
 
-import { getPartners, Partner } from '@/services/partnerService';
 import { findEndClientByINN, EndClient } from '@/services/endClientService';
 import { getCurrentUser, User } from '@/services/userService';
 import { 
@@ -66,7 +65,6 @@ export default function DealRegistrationPage() {
     mode: 'onBlur' 
   });
 
-
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
@@ -86,12 +84,6 @@ export default function DealRegistrationPage() {
   const attachmentFileRef = useRef<HTMLInputElement | null>(null);
 
   const endClientInnValue = watch('endClientInn');
-
-  const { data: partners, isLoading: isLoadingPartners, error: partnersError } = useQuery<Partner[], ApiError>({
-    queryKey: ['partners'],
-    queryFn: getPartners,
-    staleTime: 5 * 60 * 1000,
-  });
 
   const { data: currentUser, isLoading: isLoadingUser, error: userError } = useQuery<User, ApiError>({
     queryKey: ['currentUser'],
@@ -313,7 +305,7 @@ export default function DealRegistrationPage() {
     }
   };
 
-  if (isLoadingPartners || isLoadingUser) {
+  if (isLoadingUser) {
     return (
       <ProtectedRoute allowedRoles={["USER"]} redirectIfNotAllowed={true}>
         <div className="min-h-screen flex flex-col bg-discord-background">
@@ -327,7 +319,7 @@ export default function DealRegistrationPage() {
     );
   }
 
-  if (partnersError || userError) {
+  if (userError) {
     return (
       <ProtectedRoute allowedRoles={["USER"]} redirectIfNotAllowed={true}>
         <div className="min-h-screen flex flex-col bg-discord-background">
@@ -339,7 +331,7 @@ export default function DealRegistrationPage() {
                    Не удалось загрузить необходимые данные для формы (партнеры, продукты или информация о пользователе).
                  </p>
                  <p className="text-xs text-discord-text-muted">
-                   {partnersError?.message || userError?.message || "Неизвестная ошибка"}
+                   {userError?.message || "Неизвестная ошибка"}
                  </p>
              </div>
           </div>
@@ -520,8 +512,7 @@ export default function DealRegistrationPage() {
                           </label>
                           <select
                             id="fzLawType"
-                            className="discord-input w-full appearance-none pr-8"
-                            style={{backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23686b74' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")", backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em"}}
+                            className="discord-input w-full appearance-none pr-8 select-with-arrow"
                             {...register("fzLawType")}
                           >
                             <option value="">Не выбрано</option>
@@ -538,8 +529,7 @@ export default function DealRegistrationPage() {
                           </label>
                           <select
                             id="mptRegistryType"
-                            className="discord-input w-full appearance-none pr-8"
-                            style={{backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23686b74' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E\")", backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em"}}
+                            className="discord-input w-full appearance-none pr-8 select-with-arrow"
                             {...register("mptRegistryType")}
                           >
                              <option value="">Не выбрано</option>

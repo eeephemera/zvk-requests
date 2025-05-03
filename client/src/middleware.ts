@@ -1,54 +1,54 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Пути, доступные без аутентификации
-const PUBLIC_PATHS = ['/login', '/register']; // Добавьте все публичные пути
+// Список путей, которые доступны без аутентификации
+const PUBLIC_PATHS = ['/login', '/register'];
 
-// Путь по умолчанию для аутентифицированных пользователей
-const DEFAULT_AUTHENTICATED_PATH = '/requests'; // Или '/manager' в зависимости от роли, но здесь мы роль не знаем
+// Определение API путей и статических файлов
+const BYPASS_PATHS = [
+  '/api/',
+  '/_next/',
+  '/favicon.ico',
+  '/images/',
+  '/assets/',
+];
 
 export function middleware(request: NextRequest) {
-  const tokenCookie = request.cookies.get('token');
-  const tokenValue = tokenCookie?.value;
   const { pathname } = request.nextUrl;
   
-  const publicPaths = ['/login', '/register']; // Add other public paths if needed
-  const isPublicPath = publicPaths.includes(pathname);
-
-  if (!tokenValue) {
-    // No token exists
-    if (!isPublicPath) {
-      // If trying to access a protected path without a token, redirect to login
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
-    // Allow access to public paths if no token
+  // Игнорируем API запросы и статические файлы
+  if (BYPASS_PATHS.some(path => pathname.startsWith(path))) {
     return NextResponse.next();
   }
-
-  // Token exists
-  if (isPublicPath) {
-    // If logged in (token exists) and trying to access login/register, redirect away
-    // TODO: Implement role-based redirect here using getHomepageForRole if JWT could be decoded
-    const defaultAuthenticatedPath = '/'; // Redirect to root for now
-    return NextResponse.redirect(new URL(defaultAuthenticatedPath, request.url));
+  
+  // Получаем токен из куки
+  const hasAuthToken = request.cookies.has('token');
+  
+  // Корневой путь: перенаправляем на логин, если нет токена
+  if (pathname === '/' && !hasAuthToken) {
+    return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // Token exists and path is not public, allow access
-  // Role validation happens client-side in ProtectedRoute
+  // Защищенные пути: перенаправляем на логин, если нет токена
+  if (!hasAuthToken && !PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
+    const url = new URL('/login', request.url);
+    url.searchParams.set('from', pathname);
+    return NextResponse.redirect(url);
+  }
+
+  // В остальных случаях позволяем Next.js и клиентскому коду принимать решения
   return NextResponse.next();
 }
 
-// Конфигурация: указывает, к каким путям применять middleware
 export const config = {
   matcher: [
     /*
-     * Сопоставлять все пути запросов, кроме тех, что начинаются с:
-     * - api (API роуты)
-     * - _next/static (статические файлы)
-     * - _next/image (файлы оптимизации изображений)
-     * - favicon.ico (файл иконки)
-     * - /public (статические ассеты в /public) - если есть
+     * Match all request paths except for the ones starting with:
+     * - api (API routes)
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
      */
-    '/((?!api|_next/static|_next/image|favicon.ico|public).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico).*)',
   ],
 };

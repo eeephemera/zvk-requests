@@ -1,13 +1,36 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getUserRequests, downloadRequestFile, Request } from "@/services/requestService";
+import { getUserRequests, downloadRequestFile } from "@/services/requestService";
 import Link from "next/link";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import RequestDetailsModal from "@/components/RequestDetailsModal";
 import { ApiError, PaginatedResponse } from "@/services/apiClient";
+
+interface ExtendedRequest {
+  id: number;
+  partner_id: number;
+  product_id?: number;
+  end_client_id?: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  attachments?: string[];
+  partner?: {
+    id: number;
+    name: string;
+  };
+  product?: {
+    id: number;
+    name: string;
+  };
+  end_client?: {
+    id: number;
+    name: string;
+  };
+}
 
 // Константа для количества элементов на странице
 const ITEMS_PER_PAGE = 10;
@@ -24,7 +47,7 @@ export default function MyRequestsPage() {
     isFetching: isFetchingRequests, // Use this for refetching indicator
     isError: isErrorRequests,
     error: errorRequests 
-  } = useQuery<PaginatedResponse<Request>, ApiError | Error | null>({
+  } = useQuery<PaginatedResponse<ExtendedRequest>, ApiError | Error | null>({
     queryKey: ['userRequests', currentPage, ITEMS_PER_PAGE],
     queryFn: () => getUserRequests(currentPage, ITEMS_PER_PAGE),
   });
@@ -61,7 +84,7 @@ export default function MyRequestsPage() {
     return displayError;
   }, [isErrorRequests, errorRequests]);
   
-  const [selectedRequest, setSelectedRequest] = useState<Request | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<ExtendedRequest | null>(null);
   
   const totalPages = useMemo(() => Math.ceil(totalRequests / ITEMS_PER_PAGE) || 1, [totalRequests]);
 
@@ -71,7 +94,7 @@ export default function MyRequestsPage() {
     }
   };
 
-  const openRequestDetails = (req: Request) => setSelectedRequest(req);
+  const openRequestDetails = (req: ExtendedRequest) => setSelectedRequest(req);
   const closeRequestDetails = () => setSelectedRequest(null);
 
   const formatDate = (dateString: string) => {
@@ -198,7 +221,7 @@ export default function MyRequestsPage() {
               </tr>
             </thead>
             <tbody>
-              {requests.map((req: Request) => (
+              {requests.map((req: ExtendedRequest) => (
                 <tr
                   key={req.id}
                   className="discord-table-row cursor-pointer hover:bg-discord-medium transition-colors duration-200"

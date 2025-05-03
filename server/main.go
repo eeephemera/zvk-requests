@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/eeephemera/zvk-requests/db"
@@ -75,17 +76,35 @@ func main() {
 	// Создаем основной роутер
 	r := mux.NewRouter()
 
+	// Инициализируем RateLimiter
+	rateLimiter := middleware.NewRateLimiter(1*time.Minute, 100) // 100 запросов в минуту
+
 	// CORS middleware
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Получаем список разрешенных доменов из переменной окружения
+			allowedOrigins := strings.Split(os.Getenv("CORS_ALLOWED_ORIGINS"), ",")
+
 			origin := r.Header.Get("Origin")
-			if origin == "http://localhost:3000" {
+
+			// Проверяем, входит ли origin в список разрешенных
+			allowed := false
+			for _, allowedOrigin := range allowedOrigins {
+				if origin == strings.TrimSpace(allowedOrigin) {
+					allowed = true
+					break
+				}
+			}
+
+			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
+
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie")
 			w.Header().Set("Access-Control-Expose-Headers", "Set-Cookie")
+
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
@@ -94,9 +113,20 @@ func main() {
 		})
 	})
 
+	// Базовый rate limiter для всех запросов
+	r.Use(rateLimiter.LimitByIP)
+
+	// Специальный rate limiter для авторизации (более строгий: 10 запросов в минуту)
+	loginLimiter := middleware.NewRateLimiter(1*time.Minute, 10)
+
 	// Публичные маршруты (используем функции из пакета handlers)
 	r.HandleFunc("/api/register", handlers.RegisterUser).Methods("POST")
-	r.HandleFunc("/api/login", handlers.LoginUser).Methods("POST")
+
+	// Применяем более строгий rate limiter к маршруту login
+	loginRouter := r.PathPrefix("/api/login").Subrouter()
+	loginRouter.Use(loginLimiter.LimitByPath([]string{"/api/login"}, 10))
+	loginRouter.HandleFunc("", handlers.LoginUser).Methods("POST")
+
 	r.HandleFunc("/api/logout", handlers.LogoutUser).Methods("POST")
 
 	// Защищенные маршруты
@@ -129,7 +159,7 @@ func main() {
 
 	// Создаем HTTP сервер
 	server := &http.Server{
-		Addr:    ":8081",
+		Addr:    ":" + getServerPort(),
 		Handler: r,
 	}
 
@@ -155,4 +185,13 @@ func main() {
 	}
 
 	log.Println("Сервер успешно остановлен")
+}
+
+// getServerPort возвращает порт сервера из переменной окружения или значение по умолчанию
+func getServerPort() string {
+	port := os.Getenv("SERVER_PORT")
+	if port == "" {
+		port = "8081" // Значение по умолчанию
+	}
+	return port
 }

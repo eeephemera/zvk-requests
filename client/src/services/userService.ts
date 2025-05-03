@@ -1,4 +1,4 @@
-import { apiFetch, ApiError } from './apiClient';
+import { apiFetch } from './apiClient';
 
 // Тип для информации о партнере, связанном с пользователем
 interface UserPartner {
@@ -24,11 +24,14 @@ export interface User {
  */
 export async function getCurrentUser(): Promise<User> {
     try {
-        // Эндпоинт /api/me должен быть защищен и доступен после логина
-        return await apiFetch<User>('/api/me');
+        // API returns user object directly, not wrapped in data property
+        const response = await apiFetch<User>('/api/me');
+        if (!response) {
+            throw new Error('Empty response from /api/me');
+        }
+        return response;
     } catch (err) {
         console.error("Error fetching current user details:", err);
-        // Перевыбрасываем ошибку, чтобы useQuery мог ее обработать
-        throw err; 
+        throw err;
     }
-} 
+}

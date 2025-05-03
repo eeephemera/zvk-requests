@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/eeephemera/zvk-requests/db"
@@ -26,17 +27,32 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-// setTokenCookie устанавливает JWT-токен в HttpOnly cookie с указанной политикой SameSite.
+// Определяем структуру ответа для LoginUser, которая включает данные пользователя
+type LoginResponse struct {
+	Message string       `json:"message"`
+	User    *models.User `json:"user"`
+}
+
+// setTokenCookie устанавливает JWT-токен в HttpOnly cookie.
 func setTokenCookie(w http.ResponseWriter, tokenString string) {
+	// Определяем, нужно ли ставить флаг Secure
+	isProduction := os.Getenv("APP_ENV") == "production"
+
+	// Задаем время жизни токена из переменной окружения или используем значение по умолчанию
+	expirationStr := os.Getenv("JWT_EXPIRATION")
+	expiration, err := time.ParseDuration(expirationStr)
+	if err != nil {
+		expiration = 72 * time.Hour // Значение по умолчанию
+	}
+
 	cookie := &http.Cookie{
 		Name:     "token",
 		Value:    tokenString,
-		Expires:  time.Now().Add(72 * time.Hour),
+		Expires:  time.Now().Add(expiration),
 		HttpOnly: true,
-		Secure:   true, // Оставляем Secure=true, т.к. SameSite=None требует его, а Lax/Strict - рекомендуют
-		Path:     "/",  // Явно указываем Path
-		// Domain можно не указывать для localhost
-		SameSite: http.SameSiteLaxMode, // Всегда используем Lax для лучшей совместимости на localhost
+		Secure:   isProduction, // Secure=true только в продакшене (HTTPS)
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode, // Lax - хороший баланс
 	}
 	http.SetCookie(w, cookie)
 }
@@ -95,7 +111,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Устанавливаем роль пользователя принудительно как строку
-	role := models.RoleUser // Теперь это строка "USER"
+	role := models.RoleUser // Используем константу типа UserRole
 
 	// Сохранение в БД
 	conn, err := db.GetDBConnection(r.Context())
@@ -117,7 +133,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		query,
 		req.Login,
 		hashedPassword,
-		role, // Передаем строку role
+		string(role), // Преобразуем UserRole в string для передачи в БД
 		time.Now(),
 	).Scan(&user.ID, &user.Login, &user.Role, &user.CreatedAt)
 
@@ -130,7 +146,8 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	// Ответ без чувствительных данных
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user) // Возвращаем всего юзера (где role уже строка)
+	// Возвращаем пользователя (хеш пароля не включается благодаря `json:"-"`)
+	json.NewEncoder(w).Encode(user)
 }
 
 // LoginUser обрабатывает аутентификацию пользователей.
@@ -152,19 +169,26 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 
 	var user models.User
 	query := `
-        SELECT id, login, password_hash, role, created_at 
+        SELECT id, login, password_hash, role, name, email, phone, partner_id, created_at 
         FROM users 
         WHERE login = $1
     `
 	err = conn.QueryRow(r.Context(), query, req.Login).Scan(
 		&user.ID,
 		&user.Login,
-		&user.PasswordHash,
+		&user.PasswordHash, // Получаем хеш для проверки
 		&user.Role,
+		&user.Name, // Получаем доп. поля
+		&user.Email,
+		&user.Phone,
+		&user.PartnerID,
 		&user.CreatedAt,
 	)
 	if err != nil {
-		log.Printf("Login error: %v", err)
+		// Не сообщаем, что пользователь не существует
+		// Используем одинаковые сообщения об ошибке для безопасности
+		log.Printf("Login attempt failed for non-existent user: %s", req.Login)
+		time.Sleep(time.Duration(300+utils.RandomInt(500)) * time.Millisecond) // Защита от тайминг-атак
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -172,21 +196,33 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	// Проверка пароля
 	if err := utils.CheckPasswordHash(req.Password, user.PasswordHash); err != nil {
 		log.Printf("Password mismatch for user %s", user.Login)
+		time.Sleep(time.Duration(300+utils.RandomInt(500)) * time.Millisecond) // Защита от тайминг-атак
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
-	// Формируем claims с строковой ролью
+	// Получаем время жизни токена из переменной окружения
+	expirationStr := os.Getenv("JWT_EXPIRATION")
+	expiration, err := time.ParseDuration(expirationStr)
+	if err != nil {
+		expiration = 72 * time.Hour // Значение по умолчанию
+	}
+
+	// Включаем "jti" (JWT ID) для предотвращения повторного использования токена
+	tokenID := utils.GenerateSecureRandomString(16)
+
+	// Формируем claims с ролью типа UserRole и дополнительной информацией для безопасности
 	claims := jwt.MapClaims{
 		"id":    user.ID,
 		"login": user.Login,
-		"role":  user.Role, // Передаем строку user.Role напрямую
-		"exp":   time.Now().Add(72 * time.Hour).Unix(),
+		"role":  user.Role, // Передаем UserRole напрямую (будет как строка в JWT)
+		"jti":   tokenID,   // Уникальный ID токена
+		"iat":   time.Now().Unix(),
+		"exp":   time.Now().Add(expiration).Unix(),
 	}
 
 	// Генерация JWT
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	// Подписываем JWT тем же секретом, который использует middleware
 	tokenString, err := token.SignedString(middleware.GetJWTSecret())
 	if err != nil {
 		log.Printf("JWT generation failed: %v", err)
@@ -197,13 +233,12 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	// Устанавливаем куку с токеном
 	setTokenCookie(w, tokenString)
 
-	// Ответ со строковой ролью
+	// Возвращаем данные пользователя в ответе
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Login successful",
-		"role":    user.Role, // Возвращаем строку user.Role напрямую
-		"id":      user.ID,
+	json.NewEncoder(w).Encode(LoginResponse{
+		Message: "Login successful",
+		User:    &user, // Включаем полные данные пользователя (кроме хеша пароля)
 	})
 }
 
@@ -217,18 +252,39 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role, ok := ctx.Value(middleware.RoleKey).(string)
+	roleValue := ctx.Value(middleware.RoleKey)
+	role, ok := roleValue.(models.UserRole) // Ожидаем UserRole
 	if !ok {
-		http.Error(w, "Invalid user role", http.StatusUnauthorized)
-		return
+		// Попытка преобразовать строку, если в токене строка
+		roleStr, okStr := roleValue.(string)
+		if okStr {
+			role = models.UserRole(roleStr)
+		} else {
+			http.Error(w, "Invalid user role type in context", http.StatusUnauthorized)
+			return
+		}
 	}
 
-	// Генерация нового токена
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	// Получаем время жизни токена из переменной окружения
+	expirationStr := os.Getenv("JWT_EXPIRATION")
+	expiration, err := time.ParseDuration(expirationStr)
+	if err != nil {
+		expiration = 72 * time.Hour // Значение по умолчанию
+	}
+
+	// Включаем "jti" (JWT ID) для предотвращения повторного использования токена
+	tokenID := utils.GenerateSecureRandomString(16)
+
+	// Генерация нового токена с полной информацией безопасности
+	claims := jwt.MapClaims{
 		"id":   userID,
 		"role": role,
-		"exp":  time.Now().Add(1 * time.Minute).Unix(),
-	})
+		"jti":  tokenID, // Уникальный ID токена
+		"iat":  time.Now().Unix(),
+		"exp":  time.Now().Add(expiration).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(middleware.GetJWTSecret())
 	if err != nil {
 		log.Printf("Token refresh failed: %v", err)
@@ -236,96 +292,63 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Обновляем куку с новым токеном. Используем setTokenCookie, которая теперь всегда ставит Lax.
-	setTokenCookie(w, tokenString) // Передаваемый SameSite игнорируется функцией
+	// Обновляем куку с новым токеном
+	setTokenCookie(w, tokenString)
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
-		"token": tokenString,
+		"message": "Token refreshed",
 	})
 }
 
 // Me возвращает информацию о текущем пользователе
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	userID, ok := ctx.Value(middleware.UserIDKey).(int)
+	// Получаем ID пользователя из контекста
+	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {
-		RespondWithError(w, http.StatusUnauthorized, "Invalid user ID in context")
+		http.Error(w, "User ID not found in context", http.StatusUnauthorized)
 		return
 	}
 
-	// 1. Получаем полные данные пользователя из репозитория
-	user, err := h.UserRepo.GetUserByID(ctx, userID)
+	// Получаем данные пользователя
+	user, err := h.UserRepo.GetUserByID(r.Context(), userID)
 	if err != nil {
-		if err == db.ErrNotFound { // Используем стандартную ошибку репозитория
-			RespondWithError(w, http.StatusNotFound, "User not found in database")
-		} else {
-			log.Printf("Error fetching user %d for /me: %v", userID, err)
-			RespondWithError(w, http.StatusInternalServerError, "Failed to retrieve user data")
-		}
+		log.Printf("Error fetching user data: %v", err)
+		http.Error(w, "Failed to fetch user data", http.StatusInternalServerError)
 		return
 	}
 
-	// 2. Создаем структуру для ответа
-	type UserResponse struct {
-		ID      int             `json:"id"`
-		Name    string          `json:"name"` // Возвращаем строку, даже если в user указатель
-		Email   string          `json:"email"`
-		Phone   string          `json:"phone"`
-		Role    models.UserRole `json:"role"`
-		Partner *models.Partner `json:"partner,omitempty"`
-	}
-
-	// Функция-хелпер для безопасного разыменования указателя на строку
-	ptrToString := func(s *string) string {
-		if s != nil {
-			return *s
-		}
-		return "" // Возвращаем пустую строку, если указатель nil
-	}
-
-	response := UserResponse{
-		ID:    user.ID,
-		Name:  ptrToString(user.Name),  // Используем хелпер
-		Email: ptrToString(user.Email), // Используем хелпер
-		Phone: ptrToString(user.Phone), // Используем хелпер
-		Role:  user.Role,
-	}
-
-	// 3. Получаем данные партнера, если он есть
+	// Если у пользователя есть partner_id, получаем данные партнера
 	if user.PartnerID != nil {
-		partner, err := h.PartnerRepo.GetPartnerByID(ctx, *user.PartnerID)
+		partner, err := h.PartnerRepo.GetPartnerByID(r.Context(), *user.PartnerID)
 		if err != nil {
-			// Если партнер не найден или другая ошибка - логируем, но не прерываем запрос
-			log.Printf("Warning: could not fetch partner %d for user %d in /me: %v", *user.PartnerID, userID, err)
+			log.Printf("Error fetching partner data: %v", err)
+			// Не возвращаем ошибку, продолжаем без данных партнера
 		} else {
-			response.Partner = partner // Присваиваем найденного партнера
+			user.Partner = partner
 		}
 	}
 
-	// 4. Отправляем успешный ответ
-	RespondWithJSON(w, http.StatusOK, response)
+	// Возвращаем данные пользователя
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
 }
 
 func LogoutUser(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+	// Создаем cookie с истекшим сроком действия
 	cookie := &http.Cookie{
 		Name:     "token",
 		Value:    "",
-		Expires:  time.Unix(0, 0),
+		Expires:  time.Unix(0, 0), // Время в прошлом
 		HttpOnly: true,
-		Secure:   true,
-		Path:     "/",                  // Явно указываем Path и для удаления
-		SameSite: http.SameSiteLaxMode, // Используем Lax и при удалении
+		Secure:   os.Getenv("APP_ENV") == "production", // Secure для продакшена
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
 	}
 	http.SetCookie(w, cookie)
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Logged out successfully"})
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Logged out successfully",
+	})
 }

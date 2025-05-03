@@ -1,4 +1,4 @@
-import { apiFetch, ApiError } from './apiClient';
+import { apiFetch } from './apiClient';
 
 // Интерфейс Product на основе server/models/product.go
 export interface Product {
@@ -23,4 +23,4 @@ export async function getProducts(): Promise<Product[]> {
     console.error("Error fetching products:", err);
     throw err;
   }
-} 
+}

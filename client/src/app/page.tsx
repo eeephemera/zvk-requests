@@ -4,39 +4,37 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getHomepageForRole } from "@/utils/navigation";
-import LoadingSpinner from "@/components/LoadingSpinner"; // Assume spinner exists
 
 // Эта страница будет вести себя как защищенная, но логика редиректа
 // будет внутри ProtectedRoute, который вызовет getHomepageForRole
 
 export default function HomePage() {
-  const { loading, isAuthenticated, userRole } = useAuth();
+  const { isAuthenticated, userRole, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    // Wait until the auth state is determined
-    if (loading) {
-      return;
-    }
+    // Ждем, пока загрузится состояние аутентификации
+    if (loading) return;
 
-    // If loading is finished:
+    // Если пользователь аутентифицирован, перенаправляем на соответствующую домашнюю страницу
     if (isAuthenticated) {
-      // User is logged in, redirect to their specific homepage
-      const targetPath = getHomepageForRole(userRole);
-      router.replace(targetPath);
+      const homepage = getHomepageForRole(userRole);
+      console.log(`Root page: redirecting authenticated user to ${homepage}`);
+      router.replace(homepage);
     } else {
-      // User is not logged in, redirect to login page
+      // Если пользователь не аутентифицирован, перенаправляем на страницу входа
+      console.log('Root page: redirecting unauthenticated user to login');
       router.replace('/login');
     }
-  }, [loading, isAuthenticated, userRole, router]); // Dependencies for the effect
+  }, [isAuthenticated, userRole, loading, router]);
 
-  // Show a loading indicator while the authentication check is in progress
-  // and the redirect effect hasn't run yet.
+  // Показываем загрузчик во время перенаправления
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-discord-background">
-      <LoadingSpinner />
-      <p className="text-discord-text-muted mt-4">Загрузка...</p> 
-      {/* This text might only flash briefly before redirect */}
+    <div className="flex flex-col items-center justify-center min-h-screen bg-discord-background">
+      <div className="mb-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-discord-accent"></div>
+      </div>
+      <h1 className="text-discord-text text-xl">Загрузка приложения...</h1>
     </div>
   );
 }
