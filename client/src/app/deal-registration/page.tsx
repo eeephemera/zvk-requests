@@ -443,7 +443,7 @@ export default function DealRegistrationPage() {
                       {/* Описание кастомного товара */}
                       <div>
                         <label htmlFor="custom_item_description" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                          Описание (Пример: "ПК - 4 шт.", "Ноутбук - 20 шт.")
+                          Описание (Пример: &quot;ПК - 4 шт.&quot;, &quot;Ноутбук - 20 шт.&quot;)
                         </label>
                         <textarea
                           id="custom_item_description"
@@ -744,4 +744,4 @@ export default function DealRegistrationPage() {
       </div>
     </ProtectedRoute>
   );
-}
+} 

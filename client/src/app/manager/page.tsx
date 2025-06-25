@@ -10,16 +10,11 @@ import {
 import { Request } from "@/services/requestService";
 import { ApiError, PaginatedResponse } from '@/services/apiClient';
 import ProtectedRoute from "@/components/ProtectedRoute";
-import Link from "next/link";
 
 // Number of items per page
 const ITEMS_PER_PAGE = 10;
 
-interface PageProps {
-  searchParams: { [key: string]: string | string[] | undefined };
-}
-
-export default function ManagerPage({ searchParams }: Partial<PageProps>) {
+export default function ManagerPage() {
   // State variables
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterOrg, setFilterOrg] = useState<string>('');

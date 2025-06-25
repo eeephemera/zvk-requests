@@ -17,10 +17,10 @@ export default function Header() {
   };
 
   // Определяем текст роли для отображения
-  const roleText = () => {
-     if (userRole === 1 || userRole === 'Пользователь') return 'Пользователь';
-     if (userRole === 2 || userRole === 'Менеджер') return 'Менеджер';
-     return 'Неизвестно';
+  const getRoleDisplayName = (role: string | null): string => {
+    if (role === 'USER') return 'Пользователь';
+    if (role === 'MANAGER') return 'Менеджер';
+    return 'Неизвестная роль';
   };
 
   // Отображаем шапку только если пользователь аутентифицирован
@@ -39,7 +39,7 @@ export default function Header() {
         {/* Информация о пользователе и кнопка выхода */}
         <div className="flex items-center space-x-4">
            <span className="text-discord-text-secondary text-sm hidden sm:inline">
-             ID: {userId ?? 'N/A'} | Роль: {roleText()}
+             ID: {userId ?? 'N/A'} | Роль: {getRoleDisplayName(userRole)}
            </span>
            <button
              onClick={handleLogout}

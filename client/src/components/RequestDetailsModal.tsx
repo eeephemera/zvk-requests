@@ -204,15 +204,15 @@ export default function RequestDetailsModal({
                      {/* Применяем заглушки */}
                      <div>
                        <div className="text-xs text-discord-text-muted mb-1">ИНН</div>
-                       <div className="font-medium">{request?.inn ?? '-'}</div>
+                       <div className="font-medium">{request?.partner?.inn ?? '-'}</div>
                      </div>
                      <div>
                        <div className="text-xs text-discord-text-muted mb-1">Наименование организации</div>
-                       <div className="font-medium">{request?.organization_name ?? '-'}</div>
+                       <div className="font-medium">{request?.partner?.name ?? '-'}</div>
                      </div>
                      <div>
                        <div className="text-xs text-discord-text-muted mb-1">Дата реализации</div>
-                       <div className="font-medium">{request ? formatDate(request.implementation_date) : '-'}</div>
+                       <div className="font-medium">{request ? formatDate(request.created_at) : '-'}</div>
                      </div>
                    </div>
                  </div>

@@ -61,16 +61,6 @@ const normalizeRole = (role: string): string => {
   return role; // Возвращаем как есть, если не смогли нормализовать
 };
 
-// Прямая проверка наличия куки без выполнения запроса к API
-function hasAuthCookie(): boolean {
-  if (typeof document === 'undefined') return false;
-  
-  // Ищем куку token
-  return document.cookie.split(';').some(cookie => 
-    cookie.trim().startsWith('token=')
-  );
-}
-
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Состояние авторизации
   const [isAuthenticated, setIsAuthenticated] = useState(false);

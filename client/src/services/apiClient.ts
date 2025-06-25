@@ -18,17 +18,6 @@ export interface PaginatedResponse<T> {
   totalPages: number;
 }
 
-interface ApiResponse<T> {
-  data: T;
-  message?: string;
-}
-
-interface ErrorResponse {
-  error: string;
-  status: number;
-  data?: unknown;
-}
-
 export interface BlobResponse {
   blob: Blob;
   filename: string;
@@ -49,25 +38,6 @@ function handleApiError(error: unknown): never {
   }
 
   throw new ApiError('An unknown error occurred', 500);
-}
-
-// Helper function to check if the token has expired
-function isTokenExpired(token: string): boolean {
-  try {
-    const [, payload] = token.split('.');
-    const decodedPayload = JSON.parse(atob(payload));
-    const expirationTime = decodedPayload.exp * 1000; // Convert to milliseconds
-    return Date.now() >= expirationTime;
-  } catch {
-    return true;
-  }
-}
-
-// Function to parse error responses
-function parseError(response: Response, errorData: ErrorResponse): never {
-  const status = response.status;
-  const message = errorData.error || 'An unknown error occurred';
-  throw new ApiError(message, status, errorData.data);
 }
 
 // Helper function to fetch a blob with filename from content-disposition

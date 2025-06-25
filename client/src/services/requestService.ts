@@ -1,7 +1,19 @@
 import { apiClient, PaginatedResponse } from './apiClient';
 
 export interface Request {
-  partner: any;
+  partner: {
+    id: number;
+    name: string;
+    inn?: string;
+  };
+  product?: {
+    id: number;
+    name: string;
+  };
+  end_client?: {
+    id: number;
+    name: string;
+  };
   id: number;
   partner_id: number;
   product_id?: number;
@@ -10,6 +22,9 @@ export interface Request {
   created_at: string;
   updated_at: string;
   attachments?: string[];
+  fz_type?: string;
+  registry_type?: string;
+  comment?: string;
 }
 
 export interface RequestQueryParams {
@@ -68,7 +83,7 @@ export async function downloadRequestFile(requestId: number): Promise<FileDownlo
     try {
         const errorData = await response.json();
         errorMessage = errorData.message || errorMessage;
-    } catch (e) {
+    } catch {
         // Игнорируем ошибку парсинга тела, используем стандартное сообщение
     }
     throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
@@ -86,7 +101,7 @@ export async function submitDealRegistration(data: DealRegistrationData): Promis
   const formData = new FormData();
 
   // 1. Собрать данные для JSON
-  const requestData: { [key: string]: any } = {};
+  const requestData: { [key: string]: string | number | boolean | undefined | null | Array<object> } = {};
   Object.entries(data).forEach(([key, value]) => {
     // Пропускаем поле файла и null/undefined значения
     if (key !== 'attachmentFile' && value !== null && value !== undefined) {
