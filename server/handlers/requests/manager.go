@@ -69,7 +69,7 @@ func (h *RequestHandler) UpdateRequestStatusHandler(w http.ResponseWriter, r *ht
 	}
 
 	// 6. Обновляем статус в репозитории
-	err = h.Repo.UpdateRequestStatus(r.Context(), requestID, payload.Status, payload.Comment)
+	err = h.Repo.UpdateRequestStatus(r.Context(), requestID, payload.Status, &payload.Comment)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			handlers.RespondWithError(w, http.StatusNotFound, "Request not found")
@@ -272,7 +272,7 @@ func (h *RequestHandler) DownloadRequestHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Проверяем, есть ли файл
-	if req.OverallTZFile == nil || len(req.OverallTZFile) == 0 {
+	if len(req.OverallTZFile) == 0 {
 		handlers.RespondWithError(w, http.StatusNotFound, "File not found for this request")
 		return
 	}

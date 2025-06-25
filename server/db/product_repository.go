@@ -48,10 +48,9 @@ func (repo *ProductRepository) GetProductByID(ctx context.Context, id int) (*mod
 		WHERE id = $1
 	`
 	var product models.Product
-	var unitPrice *float64 // т.к. unit_price может быть NULL
 	err := repo.pool.QueryRow(ctx, query, id).Scan(
 		&product.ID, &product.SKU, &product.Name, &product.Description,
-		&product.ItemType, &unitPrice, &product.CreatedAt, &product.UpdatedAt,
+		&product.ItemType, &product.UnitPrice, &product.CreatedAt, &product.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -61,7 +60,6 @@ func (repo *ProductRepository) GetProductByID(ctx context.Context, id int) (*mod
 		return nil, fmt.Errorf("failed to fetch product: %w", err)
 	}
 
-	product.UnitPrice = unitPrice
 	return &product, nil
 }
 
@@ -119,15 +117,13 @@ func (repo *ProductRepository) GetAllProducts(ctx context.Context) ([]*models.Pr
 	var products []*models.Product
 	for rows.Next() {
 		var product models.Product
-		var unitPrice *float64 // т.к. unit_price может быть NULL
 		err := rows.Scan(
 			&product.ID, &product.SKU, &product.Name, &product.Description,
-			&product.ItemType, &unitPrice, &product.CreatedAt, &product.UpdatedAt,
+			&product.ItemType, &product.UnitPrice, &product.CreatedAt, &product.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan product row: %w", err)
 		}
-		product.UnitPrice = unitPrice
 		products = append(products, &product)
 	}
 	if err := rows.Err(); err != nil {

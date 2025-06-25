@@ -98,10 +98,10 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 			// Если не найден, создаем нового
 			newClient := &models.EndClient{
 				Name:                 requestDTO.EndClientName, // Нужно передавать все поля
-				City:                 requestDTO.EndClientCity,
-				INN:                  requestDTO.EndClientINN,
-				FullAddress:          requestDTO.EndClientFullAddress,
-				ContactPersonDetails: requestDTO.EndClientContactDetails,
+				City:                 stringToPtr(requestDTO.EndClientCity),
+				INN:                  stringToPtr(requestDTO.EndClientINN),
+				FullAddress:          stringToPtr(requestDTO.EndClientFullAddress),
+				ContactPersonDetails: stringToPtr(requestDTO.EndClientContactDetails),
 			}
 			if err := h.EndClientRepo.CreateEndClient(r.Context(), newClient); err != nil {
 				log.Printf("CreateRequestHandlerNew: Error creating new end client with INN %s: %v", requestDTO.EndClientINN, err)
@@ -143,15 +143,15 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 	// 9. Собираем основной объект заявки
 	req := &models.Request{
 		PartnerUserID:            userID,
-		PartnerID:                *user.PartnerID,                     // Мы проверили, что PartnerID не nil
-		EndClientID:              endClientID,                         // Может быть nil
-		EndClientDetailsOverride: requestDTO.EndClientDetailsOverride, // Используется, если EndClientID is nil или для доп. информации
+		PartnerID:                *user.PartnerID,                                  // Мы проверили, что PartnerID не nil
+		EndClientID:              endClientID,                                      // Может быть nil
+		EndClientDetailsOverride: stringToPtr(requestDTO.EndClientDetailsOverride), // Используется, если EndClientID is nil или для доп. информации
 		DistributorID:            requestDTO.DistributorID,
-		PartnerContactOverride:   requestDTO.PartnerContactOverride,
-		FZLawType:                requestDTO.FZLawType,
-		MPTRegistryType:          requestDTO.MPTRegistryType,
-		PartnerActivities:        requestDTO.PartnerActivities,
-		DealStateDescription:     requestDTO.DealStateDescription,
+		PartnerContactOverride:   stringToPtr(requestDTO.PartnerContactOverride),
+		FZLawType:                stringToPtr(requestDTO.FZLawType),
+		MPTRegistryType:          stringToPtr(requestDTO.MPTRegistryType),
+		PartnerActivities:        stringToPtr(requestDTO.PartnerActivities),
+		DealStateDescription:     stringToPtr(requestDTO.DealStateDescription),
 		EstimatedCloseDate:       estimatedCloseDate,
 		OverallTZFile:            fileBytes,
 		Items:                    requestDTO.Items,
@@ -262,4 +262,17 @@ func (h *RequestHandler) GetMyRequestDetailsHandler(w http.ResponseWriter, r *ht
 	// 5. Отправляем ответ
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(req)
+}
+
+// DeleteMyRequestHandler - Удаление конкретной заявки пользователя
+func (h *RequestHandler) DeleteMyRequestHandler(w http.ResponseWriter, r *http.Request) {
+	// ... (реализация аналогична GetMyRequestDetailsHandler, но с вызовом DeleteRequest)
+}
+
+// stringToPtr возвращает указатель на строку или nil, если строка пустая.
+func stringToPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

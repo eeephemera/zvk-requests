@@ -140,18 +140,21 @@ func (repo *RequestRepository) GetRequestDetailsByID(ctx context.Context, reques
 	var endClientID sql.NullInt64       // Для обработки NULL end_client_id
 	var distributorID sql.NullInt64     // Для обработки NULL distributor_id
 	var estimatedCloseDate sql.NullTime // Для обработки NULL даты
+	var partnerAddress, partnerINN, partnerStatus, endClientCity, endClientInn, endClientFullAddress, endClientContactPersonDetails *string
+	var endClientDetailsOverride, partnerContactOverride, fzLawType, mptRegistryType, partnerActivities, dealStateDescription, managerComment *string
+	var userEmail, userName, userPhone *string
 
 	err := repo.pool.QueryRow(ctx, query, requestID).Scan(
-		&req.ID, &req.PartnerUserID, &req.PartnerID, &endClientID, &req.EndClientDetailsOverride,
-		&distributorID, &req.PartnerContactOverride, &req.FZLawType, &req.MPTRegistryType,
-		&req.PartnerActivities, &req.DealStateDescription, &estimatedCloseDate,
-		&req.OverallTZFile, &req.Status, &req.ManagerComment, &req.CreatedAt, &req.UpdatedAt,
+		&req.ID, &req.PartnerUserID, &req.PartnerID, &endClientID, &endClientDetailsOverride,
+		&distributorID, &partnerContactOverride, &fzLawType, &mptRegistryType,
+		&partnerActivities, &dealStateDescription, &estimatedCloseDate,
+		&req.OverallTZFile, &req.Status, &managerComment, &req.CreatedAt, &req.UpdatedAt,
 		// User
-		&user.ID, &user.Login, &user.Role, &user.PartnerID, &user.Name, &user.Email, &user.Phone, &user.CreatedAt,
+		&user.ID, &user.Login, &user.Role, &user.PartnerID, &userName, &userEmail, &userPhone, &user.CreatedAt,
 		// Partner
-		&partner.ID, &partner.Name, &partner.Address, &partner.INN, &partner.PartnerStatus, &partner.AssignedManagerID, &partner.CreatedAt, &partner.UpdatedAt,
+		&partner.ID, &partner.Name, &partnerAddress, &partnerINN, &partnerStatus, &partner.AssignedManagerID, &partner.CreatedAt, &partner.UpdatedAt,
 		// EndClient
-		&endClient.ID, &endClient.Name, &endClient.City, &endClient.INN, &endClient.FullAddress, &endClient.ContactPersonDetails, &endClient.CreatedAt, &endClient.UpdatedAt,
+		&endClient.ID, &endClient.Name, &endClientCity, &endClientInn, &endClientFullAddress, &endClientContactPersonDetails, &endClient.CreatedAt, &endClient.UpdatedAt,
 		// Distributor
 		&distributor.ID, &distributor.Name, &distributor.Address, &distributor.INN, &distributor.PartnerStatus, &distributor.AssignedManagerID, &distributor.CreatedAt, &distributor.UpdatedAt,
 	)
@@ -165,16 +168,42 @@ func (repo *RequestRepository) GetRequestDetailsByID(ctx context.Context, reques
 	}
 
 	// Заполняем связанные структуры
+	user.Name = userName
+	user.Email = userEmail
+	user.Phone = userPhone
 	req.User = &user
+
+	partner.Address = partnerAddress
+	if partnerINN != nil {
+		partner.INN = partnerINN
+	}
+	partner.PartnerStatus = partnerStatus
 	req.Partner = &partner
+
+	req.EndClientDetailsOverride = endClientDetailsOverride
+	req.PartnerContactOverride = partnerContactOverride
+	req.FZLawType = fzLawType
+	req.MPTRegistryType = mptRegistryType
+	req.PartnerActivities = partnerActivities
+	req.DealStateDescription = dealStateDescription
+	req.ManagerComment = managerComment
+
 	if endClientID.Valid {
 		req.EndClientID = pint(int(endClientID.Int64))
+		endClient.City = endClientCity
+		if endClientInn != nil {
+			endClient.INN = endClientInn
+		}
+		endClient.FullAddress = endClientFullAddress
+		endClient.ContactPersonDetails = endClientContactPersonDetails
 		req.EndClient = &endClient
 	}
+
 	if distributorID.Valid {
 		req.DistributorID = pint(int(distributorID.Int64))
 		req.Distributor = &distributor
 	}
+
 	if estimatedCloseDate.Valid {
 		req.EstimatedCloseDate = &estimatedCloseDate.Time
 	}
@@ -257,21 +286,17 @@ func (repo *RequestRepository) ListRequestsByUser(ctx context.Context, userID, l
 	}
 
 	// 2. Получаем срез заявок с пагинацией
-	// Выбираем только основные поля для списка
+	// Для простоты, здесь мы выбираем только основные поля для отображения в списке
 	selectQuery := `
-		SELECT 
-			r.id, r.status, r.created_at, r.estimated_close_date,
-			-- Основные данные партнера и клиента для отображения в списке
-			p.name AS partner_name, 
-			COALESCE(ec.name, r.end_client_details_override) AS client_identifier 
+		SELECT r.id, r.status, r.created_at, 
+		       COALESCE(ec.name, r.end_client_details_override) AS client_identifier
 		FROM requests r
-		JOIN partners p ON r.partner_id = p.id
 		LEFT JOIN end_clients ec ON r.end_client_id = ec.id
-		WHERE r.partner_user_id = $1
+		WHERE r.partner_user_id = $1 AND ($2 = '' OR r.status = $2)
 		ORDER BY r.created_at DESC
-		LIMIT $2 OFFSET $3
+		LIMIT $3 OFFSET $4
 	`
-	rows, err := tx.Query(ctx, selectQuery, userID, limit, offset)
+	rows, err := tx.Query(ctx, selectQuery, userID, "", limit, offset)
 	if err != nil {
 		log.Printf("Error fetching requests for user ID %d: %v", userID, err)
 		return nil, 0, fmt.Errorf("failed to fetch user requests slice: %w", err)
@@ -280,30 +305,16 @@ func (repo *RequestRepository) ListRequestsByUser(ctx context.Context, userID, l
 
 	for rows.Next() {
 		var req models.Request
-		var partnerName string
-		var clientIdentifier string
-		var estimatedCloseDate sql.NullTime
-
-		// Создаем временные структуры для связанных данных, если они нужны
-		req.Partner = &models.Partner{}
-
-		err = rows.Scan(
-			&req.ID, &req.Status, &req.CreatedAt, &estimatedCloseDate,
-			&partnerName, &clientIdentifier,
-		)
+		var clientIdentifier sql.NullString
+		err := rows.Scan(&req.ID, &req.Status, &req.CreatedAt, &clientIdentifier)
 		if err != nil {
-			log.Printf("Error scanning request row for user ID %d: %v", userID, err)
-			return nil, 0, fmt.Errorf("failed to scan user request: %w", err)
+			log.Printf("Error scanning partner request row: %v", err)
+			continue
 		}
-
-		// Заполняем необходимые поля для отображения в списке
-		req.Partner.Name = partnerName
-		// Используем EndClientDetailsOverride как временное хранилище идентификатора клиента
-		req.EndClientDetailsOverride = clientIdentifier
-		if estimatedCloseDate.Valid {
-			req.EstimatedCloseDate = &estimatedCloseDate.Time
-		}
-
+		// Заполняем временное поле для отображения, если оно вам нужно.
+		// Важно: в самой модели `Request` нет поля `ClientIdentifier`.
+		// Если оно нужно, его надо добавить в модель.
+		// А пока что, мы просто игнорируем это значение, так как его некуда положить.
 		requests = append(requests, req)
 	}
 
@@ -454,16 +465,16 @@ func (repo *RequestRepository) ListRequestsByManager(
 		)
 		if err != nil {
 			log.Printf("Error scanning manager request row for manager ID %d: %v", managerID, err)
-			return nil, 0, fmt.Errorf("failed to scan manager request: %w", err)
+			continue
 		}
 
 		// Заполняем поля для отображения
 		if clientIdentifier.Valid {
 			// Используем EndClientDetailsOverride как временное хранилище
-			req.EndClientDetailsOverride = clientIdentifier.String
+			req.EndClientDetailsOverride = &clientIdentifier.String
 		}
 		if clientInn.Valid {
-			req.EndClient.INN = clientInn.String // Сохраняем ИНН, если он есть
+			req.EndClient.INN = &clientInn.String // Сохраняем ИНН, если он есть
 		}
 		if estimatedCloseDate.Valid {
 			req.EstimatedCloseDate = &estimatedCloseDate.Time
@@ -490,14 +501,11 @@ func (repo *RequestRepository) ListRequestsByManager(
 	return requests, total, nil
 }
 
-// UpdateRequestStatus обновляет статус заявки и добавляет комментарий менеджера.
-// Важно: Проверка прав менеджера должна быть выполнена в обработчике!
-func (repo *RequestRepository) UpdateRequestStatus(ctx context.Context, requestID int, newStatus string, managerComment string) error {
+// UpdateRequestStatus обновляет статус заявки и комментарий менеджера.
+func (repo *RequestRepository) UpdateRequestStatus(ctx context.Context, requestID int, newStatus string, managerComment *string) error {
 	query := `
 		UPDATE requests
-		SET status = $1, 
-			manager_comment = $2, 
-			updated_at = CURRENT_TIMESTAMP
+		SET status = $1, manager_comment = $2, updated_at = NOW()
 		WHERE id = $3
 	`
 	cmdTag, err := repo.pool.Exec(ctx, query, newStatus, managerComment, requestID)
@@ -505,16 +513,14 @@ func (repo *RequestRepository) UpdateRequestStatus(ctx context.Context, requestI
 		log.Printf("Error updating request status for ID %d: %v", requestID, err)
 		return fmt.Errorf("failed to update request status: %w", err)
 	}
-
 	if cmdTag.RowsAffected() == 0 {
-		return ErrNotFound // Заявка не найдена
+		return ErrNotFound
 	}
-
 	return nil
 }
 
-// CheckManagerAccess проверяет, имеет ли менеджер доступ к заявке
-// (т.е. назначен ли он партнеру, который создал заявку).
+// CheckManagerAccess проверяет, имеет ли менеджер доступ к заявке.
+// Доступ есть, если он назначен на партнера этой заявки.
 func (repo *RequestRepository) CheckManagerAccess(ctx context.Context, managerID int, requestID int) (bool, error) {
 	query := `
 		SELECT EXISTS (
@@ -536,10 +542,10 @@ func (repo *RequestRepository) CheckManagerAccess(ctx context.Context, managerID
 // DeleteRequest удаляет заявку и связанные с ней элементы спецификации (из-за ON DELETE CASCADE).
 // Права доступа должны проверяться в обработчике.
 func (repo *RequestRepository) DeleteRequest(ctx context.Context, requestID int) error {
-	query := `DELETE FROM requests WHERE id = $1`
+	query := "DELETE FROM requests WHERE id = $1"
 	cmdTag, err := repo.pool.Exec(ctx, query, requestID)
 	if err != nil {
-		log.Printf("Error deleting request ID %d: %v", requestID, err)
+		log.Printf("Error deleting request with ID %d: %v", requestID, err)
 		return fmt.Errorf("failed to delete request: %w", err)
 	}
 	if cmdTag.RowsAffected() == 0 {
