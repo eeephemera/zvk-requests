@@ -2,7 +2,10 @@ module github.com/eeephemera/zvk-requests
 
 go 1.23.5
 
-require github.com/jackc/pgx/v5 v5.7.2
+require (
+	github.com/jackc/pgx/v5 v5.7.2
+	github.com/shopspring/decimal v1.4.0
+)
 
 require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
