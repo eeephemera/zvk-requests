@@ -7,13 +7,13 @@ WORKDIR /app
 RUN apk add --no-cache gcc g++ make git
 
 # Копируем go.mod и go.sum
-COPY server/go.mod server/go.sum ./
+COPY go.mod go.sum ./
 
 # Загружаем зависимости
 RUN go mod download
 
 # Копируем исходный код
-COPY server/ ./
+COPY . .
 
 # Компилируем
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .

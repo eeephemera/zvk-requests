@@ -135,14 +135,25 @@ func (repo *RequestRepository) GetRequestDetailsByID(ctx context.Context, reques
 	var req models.Request
 	var user models.User
 	var partner models.Partner
-	var endClient models.EndClient
-	var distributor models.Partner
-	var endClientID sql.NullInt64       // Для обработки NULL end_client_id
-	var distributorID sql.NullInt64     // Для обработки NULL distributor_id
-	var estimatedCloseDate sql.NullTime // Для обработки NULL даты
-	var partnerAddress, partnerINN, partnerStatus, endClientCity, endClientInn, endClientFullAddress, endClientContactPersonDetails *string
+
+	// Переменные для сканирования, включая nullable-типы
+	var endClientID, distributorID sql.NullInt64
+	var estimatedCloseDate sql.NullTime
 	var endClientDetailsOverride, partnerContactOverride, fzLawType, mptRegistryType, partnerActivities, dealStateDescription, managerComment *string
 	var userEmail, userName, userPhone *string
+
+	// Nullable поля для партнера (из p.*)
+	var partnerAddress, partnerINN, partnerStatus sql.NullString
+
+	// Nullable поля для конечного клиента (из ec.*), т.к. LEFT JOIN
+	var ecID sql.NullInt64
+	var ecName, ecCity, ecInn, ecFullAddress, ecContactPersonDetails sql.NullString
+	var ecCreatedAt, ecUpdatedAt sql.NullTime
+
+	// Nullable поля для дистрибьютора (из d.*), т.к. LEFT JOIN
+	var dID, dAssignedManagerID sql.NullInt64
+	var dName, dAddress, dInn, dStatus sql.NullString
+	var dCreatedAt, dUpdatedAt sql.NullTime
 
 	err := repo.pool.QueryRow(ctx, query, requestID).Scan(
 		&req.ID, &req.PartnerUserID, &req.PartnerID, &endClientID, &endClientDetailsOverride,
@@ -153,10 +164,10 @@ func (repo *RequestRepository) GetRequestDetailsByID(ctx context.Context, reques
 		&user.ID, &user.Login, &user.Role, &user.PartnerID, &userName, &userEmail, &userPhone, &user.CreatedAt,
 		// Partner
 		&partner.ID, &partner.Name, &partnerAddress, &partnerINN, &partnerStatus, &partner.AssignedManagerID, &partner.CreatedAt, &partner.UpdatedAt,
-		// EndClient
-		&endClient.ID, &endClient.Name, &endClientCity, &endClientInn, &endClientFullAddress, &endClientContactPersonDetails, &endClient.CreatedAt, &endClient.UpdatedAt,
-		// Distributor
-		&distributor.ID, &distributor.Name, &distributor.Address, &distributor.INN, &distributor.PartnerStatus, &distributor.AssignedManagerID, &distributor.CreatedAt, &distributor.UpdatedAt,
+		// EndClient (ec.*)
+		&ecID, &ecName, &ecCity, &ecInn, &ecFullAddress, &ecContactPersonDetails, &ecCreatedAt, &ecUpdatedAt,
+		// Distributor (d.*)
+		&dID, &dName, &dAddress, &dInn, &dStatus, &dAssignedManagerID, &dCreatedAt, &dUpdatedAt,
 	)
 
 	if err != nil {
@@ -173,11 +184,10 @@ func (repo *RequestRepository) GetRequestDetailsByID(ctx context.Context, reques
 	user.Phone = userPhone
 	req.User = &user
 
-	partner.Address = partnerAddress
-	if partnerINN != nil {
-		partner.INN = partnerINN
-	}
-	partner.PartnerStatus = partnerStatus
+	// Заполняем партнера (p.*)
+	partner.Address = pstr(partnerAddress.String)
+	partner.INN = pstr(partnerINN.String)
+	partner.PartnerStatus = pstr(partnerStatus.String)
 	req.Partner = &partner
 
 	req.EndClientDetailsOverride = endClientDetailsOverride
@@ -188,19 +198,65 @@ func (repo *RequestRepository) GetRequestDetailsByID(ctx context.Context, reques
 	req.DealStateDescription = dealStateDescription
 	req.ManagerComment = managerComment
 
+	// Заполняем конечного клиента, если он есть
 	if endClientID.Valid {
 		req.EndClientID = pint(int(endClientID.Int64))
-		endClient.City = endClientCity
-		if endClientInn != nil {
-			endClient.INN = endClientInn
+		var endClient models.EndClient
+		if ecID.Valid {
+			endClient.ID = int(ecID.Int64)
 		}
-		endClient.FullAddress = endClientFullAddress
-		endClient.ContactPersonDetails = endClientContactPersonDetails
+		if ecName.Valid {
+			endClient.Name = ecName.String
+		}
+		if ecCity.Valid {
+			endClient.City = pstr(ecCity.String)
+		}
+		if ecInn.Valid {
+			endClient.INN = pstr(ecInn.String)
+		}
+		if ecFullAddress.Valid {
+			endClient.FullAddress = pstr(ecFullAddress.String)
+		}
+		if ecContactPersonDetails.Valid {
+			endClient.ContactPersonDetails = pstr(ecContactPersonDetails.String)
+		}
+		if ecCreatedAt.Valid {
+			endClient.CreatedAt = ecCreatedAt.Time
+		}
+		if ecUpdatedAt.Valid {
+			endClient.UpdatedAt = ecUpdatedAt.Time
+		}
 		req.EndClient = &endClient
 	}
 
+	// Заполняем дистрибьютора, если он есть
 	if distributorID.Valid {
 		req.DistributorID = pint(int(distributorID.Int64))
+		var distributor models.Partner
+		if dID.Valid {
+			distributor.ID = int(dID.Int64)
+		}
+		if dName.Valid {
+			distributor.Name = dName.String
+		}
+		if dAddress.Valid {
+			distributor.Address = pstr(dAddress.String)
+		}
+		if dInn.Valid {
+			distributor.INN = pstr(dInn.String)
+		}
+		if dStatus.Valid {
+			distributor.PartnerStatus = pstr(dStatus.String)
+		}
+		if dAssignedManagerID.Valid {
+			distributor.AssignedManagerID = pint(int(dAssignedManagerID.Int64))
+		}
+		if dCreatedAt.Valid {
+			distributor.CreatedAt = dCreatedAt.Time
+		}
+		if dUpdatedAt.Valid {
+			distributor.UpdatedAt = dUpdatedAt.Time
+		}
 		req.Distributor = &distributor
 	}
 
@@ -259,78 +315,86 @@ func (repo *RequestRepository) GetRequestDetailsByID(ctx context.Context, reques
 	return &req, nil
 }
 
-// ListRequestsByUser возвращает список заявок (без деталей спецификации) для конкретного пользователя-партнера.
-// Добавляет пагинацию.
-func (repo *RequestRepository) ListRequestsByUser(ctx context.Context, userID, limit, offset int) ([]models.Request, int64, error) {
-	var total int64
-	var requests []models.Request
-
-	// Используем транзакцию для согласованности COUNT и SELECT
-	tx, err := repo.pool.Begin(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx) // Откат по умолчанию, Commit будет вызван вручную
-
-	// 1. Считаем общее количество заявок пользователя
+// ListRequestsByUser возвращает список заявок для конкретного пользователя с пагинацией.
+// Включает базовую информацию о продукте и конечном клиенте для отображения в списке.
+func (r *RequestRepository) ListRequestsByUser(ctx context.Context, userID int, limit, offset int) ([]models.Request, int64, error) {
+	// 1. Получаем общее количество для пагинации
 	countQuery := `SELECT COUNT(*) FROM requests WHERE partner_user_id = $1`
-	err = tx.QueryRow(ctx, countQuery, userID).Scan(&total)
+	var total int64
+	err := r.pool.QueryRow(ctx, countQuery, userID).Scan(&total)
 	if err != nil {
-		log.Printf("Error counting requests for user ID %d: %v", userID, err)
 		return nil, 0, fmt.Errorf("failed to count user requests: %w", err)
 	}
 
 	if total == 0 {
-		_ = tx.Commit(ctx) // Коммитим, т.к. чтение прошло успешно
 		return []models.Request{}, 0, nil
 	}
 
-	// 2. Получаем срез заявок с пагинацией
-	// Для простоты, здесь мы выбираем только основные поля для отображения в списке
-	selectQuery := `
-		SELECT r.id, r.status, r.created_at, 
-		       COALESCE(ec.name, r.end_client_details_override) AS client_identifier
-		FROM requests r
-		LEFT JOIN end_clients ec ON r.end_client_id = ec.id
-		WHERE r.partner_user_id = $1 AND ($2 = '' OR r.status = $2)
-		ORDER BY r.created_at DESC
-		LIMIT $3 OFFSET $4
+	// 2. Получаем срез заявок с пагинацией и джойнами
+	query := `
+		SELECT 
+			r.id, r.partner_user_id, r.partner_id, r.end_client_id, r.status, r.created_at, r.updated_at,
+			p.id as "product.id", p.name as "product.name",
+			ec.id as "end_client.id", ec.name as "end_client.name"
+		FROM 
+			requests r
+		LEFT JOIN 
+			request_items ri ON r.id = ri.request_id AND ri.product_id IS NOT NULL
+		LEFT JOIN 
+			products p ON ri.product_id = p.id
+		LEFT JOIN
+			end_clients ec ON r.end_client_id = ec.id
+		WHERE 
+			r.partner_user_id = $1
+		ORDER BY 
+			r.created_at DESC
+		LIMIT $2 OFFSET $3
 	`
-	rows, err := tx.Query(ctx, selectQuery, userID, "", limit, offset)
+	rows, err := r.pool.Query(ctx, query, userID, limit, offset)
 	if err != nil {
-		log.Printf("Error fetching requests for user ID %d: %v", userID, err)
-		return nil, 0, fmt.Errorf("failed to fetch user requests slice: %w", err)
+		return nil, 0, fmt.Errorf("failed to query user requests: %w", err)
 	}
 	defer rows.Close()
 
+	var requests []models.Request
 	for rows.Next() {
 		var req models.Request
-		var clientIdentifier sql.NullString
-		err := rows.Scan(&req.ID, &req.Status, &req.CreatedAt, &clientIdentifier)
+		var product models.Product
+		var endClient models.EndClient
+
+		var productID, endClientID sql.NullInt64
+		var productName, endClientName sql.NullString
+
+		err := rows.Scan(
+			&req.ID, &req.PartnerUserID, &req.PartnerID, &req.EndClientID, &req.Status, &req.CreatedAt, &req.UpdatedAt,
+			&productID, &productName,
+			&endClientID, &endClientName,
+		)
 		if err != nil {
-			log.Printf("Error scanning partner request row: %v", err)
-			continue
+			return nil, 0, fmt.Errorf("failed to scan request row: %w", err)
 		}
-		// Заполняем временное поле для отображения, если оно вам нужно.
-		// Важно: в самой модели `Request` нет поля `ClientIdentifier`.
-		// Если оно нужно, его надо добавить в модель.
-		// А пока что, мы просто игнорируем это значение, так как его некуда положить.
+
+		if productID.Valid {
+			product.ID = int(productID.Int64)
+			if productName.Valid {
+				product.Name = productName.String
+			}
+			req.Product = &product
+		}
+
+		if endClientID.Valid {
+			endClient.ID = int(endClientID.Int64)
+			if endClientName.Valid {
+				endClient.Name = endClientName.String
+			}
+			req.EndClient = &endClient
+		}
+
 		requests = append(requests, req)
 	}
 
-	if err = rows.Err(); err != nil {
-		log.Printf("Rows error after scanning requests for user ID %d: %v", userID, err)
+	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("rows error after scanning user requests: %w", err)
-	}
-
-	// Коммитим транзакцию
-	if err = tx.Commit(ctx); err != nil {
-		log.Printf("Error committing transaction for listing user requests %d: %v", userID, err)
-		return nil, 0, fmt.Errorf("failed to commit list user requests transaction: %w", err)
-	}
-
-	if requests == nil {
-		requests = []models.Request{} // Гарантируем пустой срез, а не nil
 	}
 
 	return requests, total, nil
@@ -559,4 +623,12 @@ func (repo *RequestRepository) DeleteRequest(ctx context.Context, requestID int)
 // pint возвращает указатель на int. Полезно для опциональных полей ID.
 func pint(i int) *int {
 	return &i
+}
+
+// pstr возвращает указатель на строку. Полезно для nullable строковых полей.
+func pstr(s string) *string {
+	if s == "" {
+		return nil // Не создаем указатель для пустых строк
+	}
+	return &s
 }
