@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eeephemera/zvk-requests/middleware"
+	"github.com/eeephemera/zvk-requests/server/middleware"
 	"github.com/gorilla/mux"
 )
 

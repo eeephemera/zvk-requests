@@ -59,14 +59,15 @@ export async function getRequestByIdForManager(requestId: number): Promise<Reque
  * Updates the status of a request (manager action).
  * Throws ApiError on failure. Returns the updated Request.
  */
-export async function updateRequestStatus(requestId: number, status: string): Promise<Request> {
+export async function updateRequestStatus(requestId: number, status: string, comment: string): Promise<Request> {
   if (!requestId || !status) {
     throw new ApiError("Необходимо указать ID заявки и новый статус.", 400);
   }
   try {
-    return await apiFetch<Request>(`/api/manager/requests/${requestId}`, { 
+    // Убираем /api из пути, так как apiFetch его добавляет автоматически
+    return await apiFetch<Request>(`/manager/requests/${requestId}/status`, { 
       method: 'PUT',
-      body: JSON.stringify({ status }), 
+      body: JSON.stringify({ status, comment }), 
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (err) {

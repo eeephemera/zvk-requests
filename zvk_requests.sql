@@ -2,7 +2,6 @@
 -- Please log an issue at https://github.com/pgadmin-org/pgadmin4/issues/new/choose if you find any bugs, including reproduction steps.
 BEGIN;
 
-
 CREATE TABLE IF NOT EXISTS public.end_clients
 (
     id serial NOT NULL,
@@ -15,6 +14,17 @@ CREATE TABLE IF NOT EXISTS public.end_clients
     updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT end_clients_pkey PRIMARY KEY (id),
     CONSTRAINT end_clients_inn_key UNIQUE (inn)
+);
+
+CREATE TABLE IF NOT EXISTS public.files
+(
+    id serial NOT NULL,
+    file_name character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    mime_type character varying(100) COLLATE pg_catalog."default" NOT NULL,
+    file_size bigint NOT NULL,
+    file_data bytea NOT NULL,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT files_pkey PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS public.partners
@@ -31,33 +41,21 @@ CREATE TABLE IF NOT EXISTS public.partners
     CONSTRAINT partners_inn_key UNIQUE (inn)
 );
 
-CREATE TABLE IF NOT EXISTS public.products
+CREATE TABLE IF NOT EXISTS public.request_files
 (
-    id serial NOT NULL,
-    sku character varying(100) COLLATE pg_catalog."default" NOT NULL,
-    name text COLLATE pg_catalog."default" NOT NULL,
-    description text COLLATE pg_catalog."default",
-    item_type character varying(50) COLLATE pg_catalog."default" NOT NULL DEFAULT 'PC'::character varying,
-    unit_price numeric(12, 2),
-    created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT products_pkey PRIMARY KEY (id),
-    CONSTRAINT products_sku_key UNIQUE (sku)
+    request_id integer NOT NULL,
+    file_id integer NOT NULL,
+    CONSTRAINT request_files_pkey PRIMARY KEY (request_id, file_id)
 );
 
-CREATE TABLE IF NOT EXISTS public.request_items
-(
-    id serial NOT NULL,
-    request_id integer NOT NULL,
-    product_id integer,
-    custom_item_sku text COLLATE pg_catalog."default",
-    custom_item_name text COLLATE pg_catalog."default",
-    custom_item_description text COLLATE pg_catalog."default",
-    quantity integer NOT NULL,
-    unit_price numeric(12, 2),
-    total_price numeric(14, 2),
-    CONSTRAINT request_items_pkey PRIMARY KEY (id)
-);
+COMMENT ON TABLE public.request_files
+    IS 'Связующая таблица для отношения многие-ко-многим между заявками и файлами.';
+
+COMMENT ON COLUMN public.request_files.request_id
+    IS 'ID заявки';
+
+COMMENT ON COLUMN public.request_files.file_id
+    IS 'ID файла';
 
 CREATE TABLE IF NOT EXISTS public.requests
 (
@@ -73,12 +71,22 @@ CREATE TABLE IF NOT EXISTS public.requests
     partner_activities text COLLATE pg_catalog."default",
     deal_state_description text COLLATE pg_catalog."default",
     estimated_close_date date,
-    overall_tz_file bytea,
-    status character varying(50) COLLATE pg_catalog."default" NOT NULL DEFAULT 'На рассмотрении'::character varying,
     manager_comment text COLLATE pg_catalog."default",
     created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    quantity integer,
+    unit_price numeric(12, 2),
+    total_price numeric(14, 2),
+    project_name text COLLATE pg_catalog."default",
+    status request_status_enum NOT NULL DEFAULT 'На рассмотрении'::request_status_enum,
     CONSTRAINT requests_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.schema_migrations
+(
+    version bigint NOT NULL,
+    dirty boolean NOT NULL,
+    CONSTRAINT schema_migrations_pkey PRIMARY KEY (version)
 );
 
 CREATE TABLE IF NOT EXISTS public.users
@@ -86,12 +94,12 @@ CREATE TABLE IF NOT EXISTS public.users
     id serial NOT NULL,
     login character varying(255) COLLATE pg_catalog."default" NOT NULL,
     password_hash text COLLATE pg_catalog."default" NOT NULL,
-    role character varying(50) COLLATE pg_catalog."default" NOT NULL,
     partner_id integer,
     created_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
     name text COLLATE pg_catalog."default",
     email character varying(255) COLLATE pg_catalog."default",
     phone character varying(50) COLLATE pg_catalog."default",
+    role user_role_enum NOT NULL,
     CONSTRAINT users_pkey PRIMARY KEY (id),
     CONSTRAINT users_email_key UNIQUE (email),
     CONSTRAINT users_login_key UNIQUE (login)
@@ -106,20 +114,18 @@ CREATE INDEX IF NOT EXISTS idx_partners_manager
     ON public.partners(assigned_manager_id);
 
 
-ALTER TABLE IF EXISTS public.request_items
-    ADD CONSTRAINT request_items_product_id_fkey FOREIGN KEY (product_id)
-    REFERENCES public.products (id) MATCH SIMPLE
+ALTER TABLE IF EXISTS public.request_files
+    ADD CONSTRAINT request_files_file_id_fkey FOREIGN KEY (file_id)
+    REFERENCES public.files (id) MATCH SIMPLE
     ON UPDATE NO ACTION
-    ON DELETE SET NULL;
+    ON DELETE CASCADE;
 
 
-ALTER TABLE IF EXISTS public.request_items
-    ADD CONSTRAINT request_items_request_id_fkey FOREIGN KEY (request_id)
+ALTER TABLE IF EXISTS public.request_files
+    ADD CONSTRAINT request_files_request_id_fkey FOREIGN KEY (request_id)
     REFERENCES public.requests (id) MATCH SIMPLE
     ON UPDATE NO ACTION
     ON DELETE CASCADE;
-CREATE INDEX IF NOT EXISTS idx_request_items_request
-    ON public.request_items(request_id);
 
 
 ALTER TABLE IF EXISTS public.requests
@@ -147,7 +153,3 @@ ALTER TABLE IF EXISTS public.users
     ON DELETE SET NULL;
 
 END;
-
-ALTER TABLE public.request_items
-ADD CONSTRAINT check_quantity_positive CHECK (quantity > 0),
-ADD CONSTRAINT check_unit_price_non_negative CHECK (unit_price >= 0);

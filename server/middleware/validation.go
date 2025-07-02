@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/eeephemera/zvk-requests/validation"
+	"github.com/eeephemera/zvk-requests/server/validation"
 )
 
 // ValidationError описывает ошибку валидации для одного поля

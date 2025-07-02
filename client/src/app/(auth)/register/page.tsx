@@ -80,7 +80,7 @@ export default function RegisterPage() {
 
   return (
     <ProtectedRoute isPublicPage={true}>
-      <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="min-h-screen flex items-center justify-center p-6 bg-discord-background">
         <div className="bg-discord-card rounded-lg shadow-lg w-full max-w-md p-6">
           <h1 className="text-2xl font-bold text-discord-text flex items-center mb-6">
             <span className="bg-discord-accent h-8 w-1 rounded-full mr-3"></span>
@@ -111,7 +111,7 @@ export default function RegisterPage() {
                 id="login"
                 type="text"
                 placeholder="Введите логин"
-                className={`block w-full px-4 py-2 rounded-md bg-discord-input border focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.login ? 'border-discord-danger' : 'border-discord-border'}`}
+                className={`block w-full px-4 py-2 rounded-md bg-discord-input border text-discord-text placeholder:text-discord-text-muted focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.login ? 'border-discord-danger' : 'border-discord-border'}`}
                 {...register("login", { 
                   required: "Логин обязателен", 
                   minLength: {
@@ -131,7 +131,7 @@ export default function RegisterPage() {
                 id="password"
                 type="password"
                 placeholder="Введите пароль"
-                className={`block w-full px-4 py-2 rounded-md bg-discord-input border focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.password ? 'border-discord-danger' : 'border-discord-border'}`}
+                className={`block w-full px-4 py-2 rounded-md bg-discord-input border text-discord-text placeholder:text-discord-text-muted focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.password ? 'border-discord-danger' : 'border-discord-border'}`}
                 {...register("password", { 
                   required: "Пароль обязателен", 
                   minLength: {
@@ -158,7 +158,7 @@ export default function RegisterPage() {
                 id="confirmPassword"
                 type="password"
                 placeholder="Повторите пароль"
-                className={`block w-full px-4 py-2 rounded-md bg-discord-input border focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.confirmPassword ? 'border-discord-danger' : 'border-discord-border'}`}
+                className={`block w-full px-4 py-2 rounded-md bg-discord-input border text-discord-text placeholder:text-discord-text-muted focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.confirmPassword ? 'border-discord-danger' : 'border-discord-border'}`}
                 {...register("confirmPassword", { 
                   required: "Подтверждение пароля обязательно",
                   validate: value => value === password || "Пароли не совпадают"
@@ -197,7 +197,7 @@ export default function RegisterPage() {
 
           <p className="mt-5 text-center text-discord-text-muted text-sm">
             Уже зарегистрированы?{" "}
-            <Link href="/login" className="text-discord-accent hover:underline">
+            <Link href="/login" className="text-discord-accent hover:underline transition-colors duration-200">
               Войти
             </Link>
           </p>

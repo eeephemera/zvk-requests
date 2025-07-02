@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/eeephemera/zvk-requests/db"
+	"github.com/eeephemera/zvk-requests/server/db"
 )
 
 // EndClientHandler - обработчик запросов для работы с конечными клиентами

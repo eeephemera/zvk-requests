@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eeephemera/zvk-requests/middleware"
+	"github.com/eeephemera/zvk-requests/server/middleware"
 )
 
 // Настройка окружения перед тестами

@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import Header from '@/components/Header';
 import Link from 'next/link';
@@ -18,37 +19,11 @@ import {
 import { ApiError } from '@/services/apiClient';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
+// Тип, ожидаемый сервисной функцией
+type ApiDealRegistrationData = RequestServiceDealRegistrationData;
+
 // Тип для данных формы, используемый react-hook-form
-// Он соответствует тому, что возвращает input type=file (FileList | null)
-type DealRegistrationFormData = {
-    // Основные участники
-    partnerId: number;
-    distributorId?: number | null;
-    
-    // Конечный клиент
-    endClientId?: number | null;
-    endClientInn?: string;
-    endClientName?: string;
-    endClientCity?: string;
-    endClientFullAddress?: string;
-    endClientContactDetails?: string;
-    endClientDetailsOverride?: string;
-
-    // Спецификация (request_items)
-    productId?: number | null;
-    custom_item_sku?: string;
-    custom_item_description?: string;
-    unit_price?: number | null;
-
-    // Параметры сделки
-    dealStateDescription: string;
-    estimatedCloseDate?: string | null;
-    fzLawType?: string;
-    mptRegistryType?: string;
-    partnerActivities?: string;
-    partnerContactOverride?: string;
-
-    // Вложение
+type DealRegistrationFormData = Omit<ApiDealRegistrationData, 'attachmentFile'> & {
     attachmentFile?: FileList | null;
 };
 
@@ -65,6 +40,9 @@ export default function DealRegistrationPage() {
     mode: 'onBlur' 
   });
 
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
@@ -74,10 +52,11 @@ export default function DealRegistrationPage() {
   const [searchStatusMessage, setSearchStatusMessage] = useState<string | null>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --- Состояния для превью файла ---
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [filePreview, setFilePreview] = useState<string | null>(null);
+  // --- Состояния для файлов ---
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   // Снова деструктурируем register для ref
   const { ref: attachmentFileRefCallback, ...attachmentFileRegisterProps } = register("attachmentFile");
@@ -161,148 +140,140 @@ export default function DealRegistrationPage() {
     };
   }, [endClientInnValue, setValue, trigger]);
 
-  // --- Обработчик изменения файла --- 
+  // --- Обновленный обработчик изменения файла для поддержки нескольких файлов ---
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
+    const newFiles = e.target.files ? Array.from(e.target.files) : [];
+    if (newFiles.length === 0) return;
+
     setFileError(null);
+    let allFiles = [...attachedFiles, ...newFiles];
+    let validationPassed = true;
 
-    if (!file) {
-      setFileName(null);
-      setFilePreview(null);
-      return;
-    }
-
-    // Проверка размера файла
+    // Проверяем каждый файл
     const maxSize = 15 * 1024 * 1024;
-    if (file.size > maxSize) {
-      setFileError("Размер файла не должен превышать 15 МБ");
-      setFileName(null);
-      setFilePreview(null);
-      // Очищаем input через ref, полученный от register
+    allFiles.forEach(file => {
+      if (file.size > maxSize) {
+        setFileError(`Файл "${file.name}" превышает лимит в 15 МБ.`);
+        validationPassed = false;
+      }
+    });
+
+    if (!validationPassed) {
+      // Очищаем input, чтобы можно было выбрать тот же файл снова после ошибки
       if (attachmentFileRef.current) {
-         attachmentFileRef.current.value = '';
+        attachmentFileRef.current.value = '';
       }
       return;
     }
+    
+    // Обновляем состояние react-hook-form
+    const dataTransfer = new DataTransfer();
+    allFiles.forEach(file => dataTransfer.items.add(file));
+    setValue('attachmentFile', dataTransfer.files, { shouldValidate: true });
 
-    setFileName(file.name);
+    setAttachedFiles(allFiles);
+  };
 
-    // Создание превью
-    if (file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFilePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      setFilePreview('📄');
+  // --- Новые обработчики для Drag-n-Drop ---
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Это необходимо, чтобы событие onDrop сработало
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const newFiles = e.dataTransfer.files;
+    if (newFiles && newFiles.length > 0) {
+      // Имитируем событие для handleFileChange
+      const syntheticEvent = {
+        target: { files: newFiles }
+      } as unknown as ChangeEvent<HTMLInputElement>;
+      handleFileChange(syntheticEvent);
     }
   };
 
-  // --- Функция для удаления файла ---
-  const removeFile = () => {
-      setFileName(null);
-      setFilePreview(null);
+  // --- Функция для удаления одного файла из списка ---
+  const removeFile = (fileToRemove: File) => {
+    const updatedFiles = attachedFiles.filter(file => file !== fileToRemove);
+
+    const dataTransfer = new DataTransfer();
+    updatedFiles.forEach(file => dataTransfer.items.add(file));
+    setValue('attachmentFile', dataTransfer.files, { shouldValidate: true });
+
+    setAttachedFiles(updatedFiles);
+    
+    // Сбрасываем ошибку, если она была связана с размером
+    if (fileError) {
       setFileError(null);
-      // Очищаем input через ref
-      if (attachmentFileRef.current) {
-          attachmentFileRef.current.value = '';
-      }
-      // Сбрасываем значение в RHF
-      setValue('attachmentFile', null, { shouldValidate: true });
+    }
   };
 
   // --- Мутация для отправки формы --- 
-  const dealMutation = useMutation<Request, ApiError, RequestServiceDealRegistrationData>({ // Типы: Результат, Ошибка, Передаваемые данные
-      mutationFn: submitDealRegistration, // Функция из сервиса
+  const dealMutation = useMutation<Request, ApiError, ApiDealRegistrationData>({
+      mutationFn: submitDealRegistration,
       onSuccess: (createdRequest) => {
-          setFormSuccess(`Сделка #${createdRequest.id} успешно зарегистрирована!`);
-          removeFile(); 
+          // Инвалидируем кеш списка заявок, чтобы при следующем переходе он обновился
+          queryClient.invalidateQueries({ queryKey: ['userRequests'] });
+          
+          // Показываем сообщение об успехе и очищаем форму для следующей заявки
+          setFormSuccess(`Сделка #${createdRequest.id} успешно зарегистрирована. Вы можете создать новую.`);
+          setAttachedFiles([]);
           reset(); 
-          // Сбрасываем состояние поиска ИНН
+          setUploadProgress(null);
           setFoundEndClient(null);
           setIsSearchingInn(false);
           setSearchError(null);
           setSearchStatusMessage(null);
-          // Очищаем поля ИНН и клиента на всякий случай (хотя reset должен это сделать)
-          setValue('endClientInn', '');
-          setValue('endClientId', null);
-          setValue('endClientName', '');
-          setValue('endClientCity', '');
       },
       onError: (error) => {
            console.error("Ошибка отправки формы (mutation):", error);
-           // Используем сообщение из ApiError или стандартное
            setFormError(error.message || "Произошла ошибка при отправке.");
+           setUploadProgress(null);
       },
-      // onSettled: () => { // Вызывается после onSuccess или onError
-      //   // Здесь можно убирать общий индикатор загрузки страницы, если он есть
-      // }
   });
 
   // --- Обработчик отправки формы --- 
   const onSubmit: SubmitHandler<DealRegistrationFormData> = async (formData) => {
-    setFormError(null); // Сбрасываем ошибки перед новой попыткой
+    setFormError(null);
     setFormSuccess(null);
+    setUploadProgress(0);
     
-    // Проверка на наличие привязки к партнеру
     if (!currentUser || !currentUser.partner?.id) {
-      setFormError("Ваш аккаунт не привязан к компании-партнеру. Обратитесь к администратору.");
-      return;
+        setFormError("Не удалось определить вашу организацию. Пожалуйста, войдите в систему заново.");
+        return;
     }
-    
-    const fileList = formData.attachmentFile; 
-    const actualAttachmentFile: File | null = fileList && fileList.length > 0 ? fileList[0] : null;
-    
-    // Подготовка данных для отправки в сервис
-    const preparedDataForService: RequestServiceDealRegistrationData = {
-        // --- Основные участники ---
-        partnerId: formData.partnerId || currentUser.partner.id, // Используем ID партнера из профиля пользователя, если не указан в форме
-        distributorId: formData.distributorId || null,
-        
-        // --- Конечный клиент ---
-        endClientId: formData.endClientId, 
-        endClientInn: formData.endClientInn,
-        endClientName: formData.endClientName,
-        endClientCity: formData.endClientCity,
-        endClientFullAddress: formData.endClientFullAddress || undefined,
-        endClientContactDetails: formData.endClientContactDetails || undefined,
-        endClientDetailsOverride: formData.endClientDetailsOverride || undefined,
 
-        // --- Спецификация ---
-        productId: formData.productId || null,
-        customItemSku: formData.custom_item_sku || undefined,
-        customItemName: undefined,
-        customItemDescription: formData.custom_item_description || undefined,
-        quantity: null,
-        unitPrice: formData.unit_price || null,
+    const attachmentFileList = formData.attachmentFile;
+    const filesArray = attachmentFileList ? Array.from(attachmentFileList) : [];
 
-        // --- Параметры сделки ---
-        dealDescription: formData.dealStateDescription, // Переименовано в соответствии с API
-        estimatedCloseDate: formData.estimatedCloseDate || null,
-        fzLawType: formData.fzLawType || undefined,
-        mptRegistryType: formData.mptRegistryType || undefined,
-        partnerActivities: formData.partnerActivities || undefined,
-        partnerContactOverride: formData.partnerContactOverride || undefined,
+    const { attachmentFile: formAttachmentFile, ...otherFormData } = formData;
 
-        // --- Вложение ---
-        attachmentFile: actualAttachmentFile,
+    const apiData: ApiDealRegistrationData = {
+        ...otherFormData,
+        partnerId: currentUser.partner.id,
+        attachmentFiles: filesArray,
+        onUploadProgress: (progress) => {
+          setUploadProgress(progress);
+        },
     };
-
-    console.log("Calling mutation with Prepared Data:", preparedDataForService);
     
-    try {
-        // Вызываем мутацию
-        await dealMutation.mutateAsync(preparedDataForService);
-        // Обработка успеха/ошибки теперь происходит в onSuccess/onError мутации
-    } catch (error) {
-        // Сюда попадем, если сама mutateAsync выбросит ошибку (редко)
-        // Основная обработка ошибок - в onError мутации
-        console.error("Неожиданная ошибка при вызове mutateAsync:", error);
-        if (!formError) { // Устанавливаем ошибку, только если onError не сработал
-             setFormError(error instanceof Error ? error.message : "Произошла критическая ошибка при отправке.");
-        }
-    }
+    dealMutation.mutate(apiData);
   };
 
   if (isLoadingUser) {
@@ -345,17 +316,17 @@ export default function DealRegistrationPage() {
       <div className="min-h-screen flex flex-col bg-discord-background">
         <Header />
         <div className="container mx-auto p-6 flex-grow">
-          <div className="discord-card w-full max-w-4xl p-6 mx-auto">
+          <div className="bg-discord-card border border-discord-border rounded-lg w-full max-w-4xl p-6 mx-auto">
             <div className="flex justify-between items-center mb-6">
               <h1 className="text-2xl font-bold text-discord-text flex items-center">
                 <span className="bg-discord-accent h-8 w-1 rounded-full mr-3"></span>
-                Регистрация новой сделки
+                Новая регистрация
               </h1>
               <Link
                 href="/my-requests"
-                className="discord-btn-secondary"
+                className="discord-btn-secondary transition-colors duration-200"
               >
-                Мои регистрации
+                К списку регистраций
               </Link>
             </div>
 
@@ -365,14 +336,24 @@ export default function DealRegistrationPage() {
                </div>
             )}
              {formSuccess && (
-               <div className="mb-4 p-3 bg-discord-success bg-opacity-10 rounded-lg border border-discord-success border-opacity-30">
-                 <p className="text-discord-success text-sm">{formSuccess}</p>
+               <div className="mb-4 p-3 flex justify-between items-center bg-discord-success bg-opacity-10 rounded-lg border border-discord-success border-opacity-30">
+                 <p className="text-discord-text text-sm font-medium">{formSuccess}</p>
+                 <button
+                   type="button"
+                   onClick={() => setFormSuccess(null)}
+                   className="text-discord-text hover:bg-discord-success/20 rounded-full p-1 transition-colors duration-200"
+                   aria-label="Скрыть сообщение об успехе"
+                 >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                 </button>
                </div>
             )}
 
             <form className="space-y-5" onSubmit={handleSubmit(onSubmit)}>
                 {/* --- 1. Информация о партнере --- */}
-                <div className="border border-discord-border p-4 rounded-md bg-discord-darker space-y-5">
+                <div className="border border-discord-border p-4 rounded-lg bg-discord-background space-y-5">
                   <h3 className="text-lg font-semibold text-discord-text mb-3">Информация о партнере</h3>
                   
                   {/* Отображаем информацию о текущем пользователе и его компании (партнере) */}
@@ -420,99 +401,94 @@ export default function DealRegistrationPage() {
                 </div>
 
                 {/* --- 2. Описание сделки --- */}
-                <div className="border border-discord-border p-4 rounded-md bg-discord-darker space-y-5">
-                  <h3 className="text-lg font-semibold text-discord-text mb-3">Описание сделки и продукта</h3>
+                <div className="border border-discord-border p-4 rounded-lg bg-discord-background space-y-5">
+                  <h3 className="text-lg font-semibold text-discord-text mb-3">Описание проекта</h3>
+                  
+                  {/* Новое поле - Название проекта */}
+                  <div>
+                    <label htmlFor="projectName" className="form-label">Название проекта/сделки *</label>
+                    <input
+                      id="projectName"
+                      type="text"
+                      placeholder="Например, 'Поставка серверов для нужд ООО Ромашка'"
+                      className={`discord-input w-full ${formErrors.projectName ? 'border-discord-danger' : ''}`}
+                      {...register("projectName", { required: "Название проекта обязательно" })}
+                    />
+                    {formErrors.projectName && <p className="form-error-message">{formErrors.projectName.message}</p>}
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     {/* Левая колонка описания */}
                     <div className="space-y-5">
-                      {/* SKU кастомного товара */}
-                      <div>
-                        <label htmlFor="custom_item_sku" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                          Артикул/Код (опционально)
-                        </label>
-                        <input
-                          id="custom_item_sku"
-                          type="text"
-                          placeholder="Артикул продукта"
-                          className={`discord-input w-full ${formErrors.custom_item_sku ? 'border-discord-danger' : ''}`}
-                          {...register("custom_item_sku")}
-                        />
-                        {formErrors.custom_item_sku && <p className="text-discord-danger text-xs mt-1">{formErrors.custom_item_sku.message}</p>}
-                      </div>
+                      {/* ПОЛЯ ДЛЯ ТОВАРА УДАЛЕНЫ */}
 
-                      {/* Описание кастомного товара */}
-                      <div>
-                        <label htmlFor="custom_item_description" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                          Описание (Пример: &quot;ПК - 4 шт.&quot;, &quot;Ноутбук - 20 шт.&quot;)
-                        </label>
-                        <textarea
-                          id="custom_item_description"
-                          placeholder="Подробное описание, требования..."
-                          className={`discord-input w-full resize-none ${formErrors.custom_item_description ? 'border-discord-danger' : ''}`}
-                          rows={3}
-                          {...register("custom_item_description")}
-                        />
-                        {formErrors.custom_item_description && <p className="text-discord-danger text-xs mt-1">{formErrors.custom_item_description.message}</p>}
+                      {/* ГРУППА ДЛЯ ЦЕНЫ И КОЛИЧЕСТВА - НАЧАЛО */}
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="sm:w-1/2">
+                          <label htmlFor="quantity" className="form-label">Количество</label>
+                          <input
+                            id="quantity"
+                            type="number"
+                            placeholder="Кол-во"
+                            className={`discord-input w-full ${formErrors.quantity ? 'border-discord-danger' : ''}`}
+                            {...register("quantity", { 
+                              valueAsNumber: true,
+                              min: { value: 1, message: "Количество должно быть больше 0" }
+                            })}
+                          />
+                          {formErrors.quantity && <p className="form-error-message">{formErrors.quantity.message}</p>}
+                        </div>
+                        <div className="sm:w-1/2">
+                          <label htmlFor="unitPrice" className="form-label">Цена за ед.</label>
+                          <input
+                            id="unitPrice"
+                            type="number"
+                            placeholder="Цена за единицу"
+                            className={`discord-input w-full ${formErrors.unitPrice ? 'border-discord-danger' : ''}`}
+                            {...register("unitPrice", { 
+                              valueAsNumber: true,
+                              min: { value: 0, message: "Цена не может быть отрицательной" }
+                            })}
+                          />
+                          {formErrors.unitPrice && <p className="form-error-message">{formErrors.unitPrice.message}</p>}
+                        </div>
                       </div>
-
-                      {/* Цена за единицу */}
-                      <div>
-                        <label htmlFor="unit_price" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                          Цена за ед. (₽, опционально)
-                        </label>
-                        <input
-                          id="unit_price"
-                          type="number"
-                          placeholder="Цена за единицу"
-                          className={`discord-input w-full ${formErrors.unit_price ? 'border-discord-danger' : ''}`}
-                          {...register("unit_price", { 
-                            valueAsNumber: true,
-                            min: { value: 0, message: "Цена не может быть отрицательной" }
-                          })}
-                        />
-                        {formErrors.unit_price && <p className="text-discord-danger text-xs mt-1">{formErrors.unit_price.message}</p>}
-                      </div>
+                      {/* ГРУППА ДЛЯ ЦЕНЫ И КОЛИЧЕСТВА - КОНЕЦ */}
+                       {/* Описание сделки (ТЗ) */}
+                       <div>
+                          <label htmlFor="dealDescription" className="form-label">Подробнее о сделке / Техническое задание *</label>
+                          <textarea
+                            id="dealDescription"
+                            placeholder="Опишите суть сделки, потребности клиента, технические требования..."
+                            className={`discord-input w-full ${formErrors.dealDescription ? 'border-discord-danger' : ''}`}
+                            rows={8}
+                            {...register("dealDescription", { required: "Описание сделки обязательно" })}
+                          />
+                          {formErrors.dealDescription && <p className="form-error-message">{formErrors.dealDescription.message}</p>}
+                        </div>
                     </div>
                     {/* Правая колонка описания */}
                     <div className="space-y-5">
-                       {/* Описание сделки */}
-                        <div>
-                          <label htmlFor="dealStateDescription" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Подробнее о сделке <span className="text-discord-danger">*</span>
-                          </label>
-                          <textarea
-                            id="dealStateDescription"
-                            placeholder="Опишите суть сделки, потребности клиента..."
-                            className={`discord-input w-full resize-none ${formErrors.dealStateDescription ? 'border-discord-danger' : ''}`}
-                            rows={6}
-                            {...register("dealStateDescription", { required: "Описание сделки обязательно" })}
-                          />
-                          {formErrors.dealStateDescription && <p className="text-discord-danger text-xs mt-1">{formErrors.dealStateDescription.message}</p>}
-                        </div>
-                        
+                       
                         {/* Активности партнера */} 
                         <div>
-                           <label htmlFor="partnerActivities" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                             Ключевые активности партнера (опционально)
-                           </label>
+                           <label htmlFor="partnerActivities" className="form-label">Ключевые активности партнера (опционально)</label>
                            <textarea
                              id="partnerActivities"
                              placeholder="Что партнер делает для продвижения сделки?"
-                             className={`discord-input w-full resize-none ${formErrors.partnerActivities ? 'border-discord-danger' : ''}`}
+                             className={`discord-input w-full ${formErrors.partnerActivities ? 'border-discord-danger' : ''}`}
                              rows={4}
                              {...register("partnerActivities")}
                            />
-                           {formErrors.partnerActivities && <p className="text-discord-danger text-xs mt-1">{formErrors.partnerActivities.message}</p>}
+                           {formErrors.partnerActivities && <p className="form-error-message">{formErrors.partnerActivities.message}</p>}
                         </div>
                         
                         {/* Тип ФЗ */}
                         <div>
-                          <label htmlFor="fzLawType" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Тип ФЗ (опционально)
-                          </label>
+                          <label htmlFor="fzLawType" className="form-label">Тип ФЗ (опционально)</label>
                           <select
                             id="fzLawType"
-                            className="discord-input w-full appearance-none pr-8 select-with-arrow"
+                            className="discord-input w-full"
                             {...register("fzLawType")}
                           >
                             <option value="">Не выбрано</option>
@@ -524,12 +500,10 @@ export default function DealRegistrationPage() {
                         
                         {/* Тип реестра МПТ */}
                         <div>
-                          <label htmlFor="mptRegistryType" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Тип реестра МПТ (опционально)
-                          </label>
+                          <label htmlFor="mptRegistryType" className="form-label">Тип реестра МПТ (опционально)</label>
                           <select
                             id="mptRegistryType"
-                            className="discord-input w-full appearance-none pr-8 select-with-arrow"
+                            className="discord-input w-full"
                             {...register("mptRegistryType")}
                           >
                              <option value="">Не выбрано</option>
@@ -540,16 +514,14 @@ export default function DealRegistrationPage() {
                         
                         {/* Ожидаемая дата закрытия */}
                         <div>
-                          <label htmlFor="estimatedCloseDate" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Ожидаемая дата закрытия сделки
-                          </label>
+                          <label htmlFor="estimatedCloseDate" className="form-label">Ожидаемая дата закрытия сделки</label>
                           <input
                             id="estimatedCloseDate"
                             type="date"
                             className={`discord-input w-full ${formErrors.estimatedCloseDate ? 'border-discord-danger' : ''}`}
                             {...register("estimatedCloseDate")}
                           />
-                           {formErrors.estimatedCloseDate && <p className="text-discord-danger text-xs mt-1">{formErrors.estimatedCloseDate.message}</p>}
+                           {formErrors.estimatedCloseDate && <p className="form-error-message">{formErrors.estimatedCloseDate.message}</p>}
                         </div>
                     </div>
                   </div>
@@ -557,14 +529,12 @@ export default function DealRegistrationPage() {
 
 
                 {/* --- 3. Информация о конечном клиенте --- */}
-                <div className="border border-discord-border p-4 rounded-md bg-discord-darker relative">
+                <div className="border border-discord-border p-4 rounded-lg bg-discord-background relative">
                   <h3 className="text-lg font-semibold text-discord-text mb-3">Конечный клиент</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     {/* ИНН */}
                     <div className="relative">
-                      <label htmlFor="endClientInn" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                        ИНН конечного клиента <span className="text-discord-danger">*</span>
-                      </label>
+                      <label htmlFor="endClientInn" className="form-label">ИНН конечного клиента *</label>
                       <input
                         id="endClientInn"
                         type="text"
@@ -583,7 +553,7 @@ export default function DealRegistrationPage() {
                              <LoadingSpinner />
                            </div>
                        )}
-                      {formErrors.endClientInn && <p className="text-discord-danger text-xs mt-1">{formErrors.endClientInn.message}</p>}
+                      {formErrors.endClientInn && <p className="form-error-message">{formErrors.endClientInn.message}</p>}
                       <div className="mt-1 text-xs h-4">
                           {searchStatusMessage && !searchError && (
                              <span className={`${foundEndClient ? 'text-discord-success' : 'text-discord-text-muted'}`}>{searchStatusMessage}</span>
@@ -597,9 +567,7 @@ export default function DealRegistrationPage() {
                     {/* Поля для нового клиента */}
                     <>
                        <div>
-                        <label htmlFor="endClientName" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                          Наименование { !foundEndClient && <span className="text-discord-danger">*</span> }
-                        </label>
+                        <label htmlFor="endClientName" className="form-label">Наименование { !foundEndClient && <span className="text-discord-danger">*</span> }</label>
                         <input
                           id="endClientName"
                           type="text"
@@ -610,16 +578,14 @@ export default function DealRegistrationPage() {
                           })}
                           disabled={!!foundEndClient || isSearchingInn}
                         />
-                        {formErrors.endClientName && <p className="text-discord-danger text-xs mt-1">{formErrors.endClientName.message}</p>}
+                        {formErrors.endClientName && <p className="form-error-message">{formErrors.endClientName.message}</p>}
                       </div>
                     </>
 
                     {/* Новые поля */} 
                     {/* Полный адрес */} 
                     <div>
-                        <label htmlFor="endClientFullAddress" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Полный адрес
-                        </label>
+                        <label htmlFor="endClientFullAddress" className="form-label">Полный адрес</label>
                         <input
                           id="endClientFullAddress"
                           type="text"
@@ -628,13 +594,11 @@ export default function DealRegistrationPage() {
                           {...register("endClientFullAddress")}
                           disabled={!!foundEndClient || isSearchingInn} // Блокировать, если клиент найден
                         />
-                         {formErrors.endClientFullAddress && <p className="text-discord-danger text-xs mt-1">{formErrors.endClientFullAddress.message}</p>}
+                         {formErrors.endClientFullAddress && <p className="form-error-message">{formErrors.endClientFullAddress.message}</p>}
                     </div>
                      {/* Контактное лицо клиента */} 
                      <div>
-                        <label htmlFor="endClientContactDetails" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                            Контактное лицо клиента (опционально)
-                        </label>
+                        <label htmlFor="endClientContactDetails" className="form-label">Контактное лицо клиента (опционально)</label>
                         <input
                           id="endClientContactDetails"
                           type="text"
@@ -643,7 +607,7 @@ export default function DealRegistrationPage() {
                           {...register("endClientContactDetails")}
                           disabled={!!foundEndClient || isSearchingInn} // Блокировать, если клиент найден
                         />
-                         {formErrors.endClientContactDetails && <p className="text-discord-danger text-xs mt-1">{formErrors.endClientContactDetails.message}</p>}
+                         {formErrors.endClientContactDetails && <p className="form-error-message">{formErrors.endClientContactDetails.message}</p>}
                     </div>
 
                   </div>
@@ -651,63 +615,84 @@ export default function DealRegistrationPage() {
 
                 {/* --- 4. Вложение (опционально) --- */}
                 <div>
-                  <label htmlFor="attachmentFile" className="block text-discord-text-secondary text-sm mb-1.5 font-medium">
-                    Прикрепить файл (опционально, макс. 15МБ)
-                  </label>
-                  <div className={`border border-dashed rounded-lg p-4 bg-discord-darker transition-colors ${fileError ? 'border-discord-danger' : 'border-discord-lightest hover:border-discord-accent/50'}`}>
-                    <input
-                      id="attachmentFile"
-                      type="file"
-                       // Передаем ref через колбэк
-                       ref={(e) => {
-                         attachmentFileRefCallback(e); // Вызываем оригинальный ref от RHF
-                         attachmentFileRef.current = e; // Сохраняем ссылку в наш ref
-                       }}
-                      // Применяем остальные пропсы от register
-                      {...attachmentFileRegisterProps} // Используем props без ref
-                      className="hidden"
-                      // Явный onChange для нашей логики превью
-                      onChange={handleFileChange}
-                      accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.gif,.zip,.rar,.7z"
-                    />
-                    <label htmlFor="attachmentFile" className="cursor-pointer flex flex-col items-center text-discord-text-muted">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 mb-2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-                      </svg>
-                      <span className="text-sm mb-1">Перетащите файл сюда или нажмите, чтобы выбрать</span>
-                      <span className="text-xs">(PDF, DOC, DOCX, XLS, XLSX, JPG, PNG и др.)</span>
-                    </label>
-                  </div>
-                  {fileError && <p className="text-discord-danger text-xs mt-1">{fileError}</p>}
-
-                  {fileName && filePreview && (
-                    <div className="mt-3 p-3 rounded-lg flex items-center bg-discord-medium border border-discord-border">
-                      {filePreview.startsWith('data:image') ? (
-                        <Image 
-                          src={filePreview} 
-                          alt="Превью" 
-                          width={48}
-                          height={48}
-                          className="h-12 w-auto object-contain mr-3 rounded-md bg-discord-darker p-1" 
-                        />
-                      ) : (
-                        <div className="h-10 w-10 bg-discord-dark rounded-md flex items-center justify-center mr-3 text-discord-accent text-xl">
-                           {filePreview} 
-                        </div>
-                      )}
-                      <div className="flex-1 overflow-hidden">
-                        <div className="text-sm text-discord-text truncate" title={fileName}>{fileName}</div>
-                      </div>
-                      <button 
-                        type="button"
-                        onClick={removeFile}
-                        className="ml-2 text-discord-text-muted hover:text-discord-danger transition-colors p-1 rounded-full hover:bg-discord-danger/10"
-                        aria-label="Удалить файл"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  <label htmlFor="attachmentFile" className="form-label">Прикрепить файлы (опционально, макс. 15МБ)</label>
+                  <div
+                    onDragEnter={handleDragEnter}
+                    onDragLeave={handleDragLeave}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    className={`border border-dashed rounded-lg p-4 bg-discord-background transition-colors ${
+                      fileError ? 'border-discord-danger'
+                      : isDragging ? 'border-discord-accent bg-discord-accent/10'
+                      : 'border-discord-border hover:border-discord-accent/50'
+                    }`}
+                  >
+                    <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-600 border-dashed rounded-md pointer-events-none">
+                      <div className="space-y-1 text-center">
+                        <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                          <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
-                      </button>
+                        <div className="flex text-sm text-gray-500">
+                          <label htmlFor="attachmentFile" className="relative cursor-pointer bg-discord-gray-light rounded-md font-medium text-indigo-400 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500 pointer-events-auto">
+                            <span>{isDragging ? 'Отпустите, чтобы добавить' : 'Перетащите файлы сюда'}</span>
+                            <input
+                              id="attachmentFile"
+                              type="file"
+                              multiple // <<< Разрешаем выбор нескольких файлов
+                              className="hidden"
+                              {...attachmentFileRegisterProps}
+                              ref={(e) => {
+                                attachmentFileRefCallback(e);
+                                attachmentFileRef.current = e;
+                              }}
+                              onChange={(e) => {
+                                attachmentFileRegisterProps.onChange(e);
+                                handleFileChange(e);
+                              }}
+                            />
+                          </label>
+                          <p className="pl-1 pointer-events-none">или нажмите, чтобы выбрать</p>
+                        </div>
+                        <p className="text-xs text-gray-400 pointer-events-none">
+                          (PDF, DOC, DOCX, XLS, XLSX, JPG, PNG и др.)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  {fileError && <p className="form-error-message">{fileError}</p>}
+
+                  {/* Новый блок для отображения списка файлов */}
+                  {attachedFiles.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      <h4 className="text-sm font-medium text-discord-text-muted">Прикрепленные файлы:</h4>
+                      {attachedFiles.map((file, index) => (
+                        <div key={index} className="p-2 pr-3 rounded-lg flex items-center bg-discord-input border border-discord-border overflow-hidden relative">
+                           {/* Полоса прогресса */}
+                           {uploadProgress !== null && (
+                              <div
+                                 className="absolute top-0 left-0 h-full bg-discord-accent/20 transition-all duration-300 ease-linear"
+                                 style={{ width: `${uploadProgress}%` }}
+                              />
+                           )}
+                           <div className="relative z-10 h-8 w-8 bg-discord-card rounded-md flex items-center justify-center mr-3 text-discord-accent text-lg">
+                              📄
+                           </div>
+                           <div className="relative z-10 flex-1 overflow-hidden">
+                              <div className="text-sm text-discord-text truncate" title={file.name}>{file.name}</div>
+                              <div className="text-xs text-discord-text-muted">{(file.size / 1024).toFixed(1)} KB</div>
+                           </div>
+                           <button 
+                              type="button"
+                              onClick={() => removeFile(file)}
+                              className="relative z-10 ml-2 text-discord-text-muted hover:text-discord-danger transition-colors duration-200 p-1 rounded-full hover:bg-discord-danger/10"
+                              aria-label={`Удалить файл ${file.name}`}
+                           >
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                           </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

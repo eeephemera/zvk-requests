@@ -111,3 +111,20 @@ func ValidateImplementationDate(date string) error {
 
 	return nil
 }
+
+// ValidateRequestStatus проверяет, является ли статус допустимым
+func ValidateRequestStatus(status string) error {
+	validStatuses := map[string]struct{}{
+		"На рассмотрении": {},
+		"В работе":        {},
+		"На уточнении":    {},
+		"Одобрена":        {},
+		"Отклонена":       {},
+		"Завершена":       {},
+	}
+
+	if _, ok := validStatuses[status]; !ok {
+		return errors.New("недопустимый статус заявки")
+	}
+	return nil
+}

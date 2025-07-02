@@ -123,9 +123,20 @@ export class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
+    const headers = new Headers(options.headers);
+    
+    // Удаляем старую логику и ставим новую:
+    // НЕ устанавливаем Content-Type, если тело - FormData.
+    // Браузер сделает это сам с правильным boundary.
+    if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+    
     try {
       const response = await fetch(this.baseUrl + endpoint, {
         ...options,
+        headers, // Используем обновленные заголовки
+        credentials: 'include',
         signal: AbortSignal.timeout(this.timeout),
       });
       
@@ -155,12 +166,58 @@ export class ApiClient {
     return this.request<T>(endpoint, { ...options, method: 'GET' });
   }
 
-  // Typed POST method with proper type handling for the body
+  // Typed POST method
   async post<T, U = unknown>(
     endpoint: string,
     body?: U,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    // Добавляем опциональный колбэк для прогресса
+    onUploadProgress?: (progress: number) => void
   ): Promise<T> {
+    // Если тело - FormData и есть колбэк, используем XHR
+    if (body instanceof FormData && onUploadProgress) {
+      return new Promise<T>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", this.baseUrl + endpoint, true);
+
+        // Устанавливаем заголовки, если они есть
+        const headers = new Headers(options.headers);
+        headers.forEach((value, key) => {
+          xhr.setRequestHeader(key, value);
+        });
+        
+        // Отслеживаем прогресс
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = Math.round((event.loaded / event.total) * 100);
+            onUploadProgress(percentComplete);
+          }
+        };
+
+        // Обработка завершения запроса
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(JSON.parse(xhr.responseText));
+          } else {
+            const error = JSON.parse(xhr.responseText);
+            reject(new ApiError(
+              error?.message || `HTTP error! status: ${xhr.status}`,
+              xhr.status,
+              error
+            ));
+          }
+        };
+
+        // Обработка ошибок
+        xhr.onerror = () => {
+          reject(new ApiError('Request failed', xhr.status));
+        };
+
+        xhr.send(body);
+      });
+    }
+
+    // В противном случае используем fetch, как и раньше
     const config: RequestInit = {
       ...options,
       method: 'POST',
@@ -175,12 +232,11 @@ export class ApiClient {
     body?: U,
     options: RequestInit = {}
   ): Promise<T> {
-    const config: RequestInit = {
+    return this.request<T>(endpoint, {
       ...options,
       method: 'PUT',
       body: body instanceof FormData ? body : JSON.stringify(body),
-    };
-    return this.request<T>(endpoint, config);
+    });
   }
 
   // Typed DELETE method

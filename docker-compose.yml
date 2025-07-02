@@ -1,60 +1,49 @@
-version: '3.9'
-
 services:
   # Клиентская часть (Next.js)
   client:
     build:
-      context: .
-      dockerfile: client/Dockerfile
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: zvk_client
+    restart: always
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8081
+      - NEXT_PUBLIC_API_URL=http://server:8081/api
     depends_on:
       - server
-    networks:
-      - zvk-network
 
   # Серверная часть (Go)
   server:
     build:
-      context: .
-      dockerfile: server/Dockerfile
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: zvk_server
+    restart: always
+    env_file:
+      - server/.env
     ports:
       - "8081:8081"
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=1
-      - DB_NAME=zvk_requests
-      - DB_SSLMODE=disable
-      - JWT_SECRET=qwerty123
-      - JWT_EXPIRATION=72h
-      - SERVER_PORT=8081
-      - CORS_ALLOWED_ORIGINS=http://localhost:3000
     depends_on:
-      - postgres
-    networks:
-      - zvk-network
+      postgres:
+        condition: service_healthy
 
   # База данных PostgreSQL
   postgres:
-    image: postgres:16-alpine
+    image: postgres:15-alpine
+    container_name: zvk_postgres
+    restart: always
+    env_file:
+      - server/.env
     ports:
       - "5433:5432"
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=1
-      - POSTGRES_DB=zvk_requests
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - zvk-network
-
-networks:
-  zvk-network:
-    driver: bridge
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${DB_USER} -d $${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

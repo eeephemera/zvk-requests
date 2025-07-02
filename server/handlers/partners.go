@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/eeephemera/zvk-requests/db"
+	"github.com/eeephemera/zvk-requests/server/db"
 )
 
 // PartnerHandler - обработчик запросов для работы с партнерами

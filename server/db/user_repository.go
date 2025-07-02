@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/eeephemera/zvk-requests/models"
+	"github.com/eeephemera/zvk-requests/server/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -29,11 +29,9 @@ func (repo *UserRepository) CreateUser(ctx context.Context, user *models.User) e
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at
 	`
-	// Преобразуем роль в строку для записи в БД
-	roleStr := string(user.Role)
-
+	// pgx/v5 автоматически обработает кастомный строковый тип user.Role
 	err := repo.pool.QueryRow(ctx, query,
-		user.Login, user.PasswordHash, roleStr, user.PartnerID,
+		user.Login, user.PasswordHash, user.Role, user.PartnerID,
 		user.Name, user.Email, user.Phone,
 	).Scan(&user.ID, &user.CreatedAt)
 
@@ -53,10 +51,9 @@ func (repo *UserRepository) GetUserByID(ctx context.Context, id int) (*models.Us
 		WHERE id = $1
 	`
 	var user models.User
-	var roleStr string // Временная переменная для сканирования роли как строки
 
 	err := repo.pool.QueryRow(ctx, query, id).Scan(
-		&user.ID, &user.Login, &user.PasswordHash, &roleStr,
+		&user.ID, &user.Login, &user.PasswordHash, &user.Role,
 		&user.PartnerID, &user.Name, &user.Email, &user.Phone, &user.CreatedAt,
 	)
 	if err != nil {
@@ -67,10 +64,6 @@ func (repo *UserRepository) GetUserByID(ctx context.Context, id int) (*models.Us
 		log.Printf("Error fetching user by ID %d: %v", id, err)
 		return nil, fmt.Errorf("failed to fetch user by ID: %w", err)
 	}
-
-	// Преобразуем строку роли обратно в тип models.UserRole
-	user.Role = models.UserRole(roleStr)
-	// TODO: Добавить валидацию, что полученная роль соответствует допустимым значениям
 
 	return &user, nil
 }
@@ -84,10 +77,9 @@ func (repo *UserRepository) GetUserByLogin(ctx context.Context, login string) (*
 		WHERE login = $1
 	`
 	var user models.User
-	var roleStr string
 
 	err := repo.pool.QueryRow(ctx, query, login).Scan(
-		&user.ID, &user.Login, &user.PasswordHash, &roleStr,
+		&user.ID, &user.Login, &user.PasswordHash, &user.Role,
 		&user.PartnerID, &user.Name, &user.Email, &user.Phone, &user.CreatedAt,
 	)
 	if err != nil {
@@ -99,9 +91,6 @@ func (repo *UserRepository) GetUserByLogin(ctx context.Context, login string) (*
 		log.Printf("Error fetching user by login %s: %v", login, err)
 		return nil, fmt.Errorf("failed to fetch user by login: %w", err)
 	}
-
-	user.Role = models.UserRole(roleStr)
-	// TODO: Добавить валидацию роли
 
 	return &user, nil
 }

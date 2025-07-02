@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eeephemera/zvk-requests/models"
+	"github.com/eeephemera/zvk-requests/server/models"
 	"github.com/golang-jwt/jwt/v5"
 )
 

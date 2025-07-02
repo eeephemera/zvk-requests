@@ -10,22 +10,22 @@ export default {
     extend: {
       colors: {
         discord: {
-          background: '#36393f', // Основной темный фон
-          card: '#2f3136',      // Фон карточек/элементов
-          input: '#202225',     // Фон полей ввода
+          background: '#121212', // Настоящий темный фон
+          card: '#1e1e1e',      // Карточки и elevated-поверхности
+          input: '#2d2d2d',     // Поля ввода
           'button-primary': '#5865f2', // Основная кнопка (фиолетовая)
-          'button-secondary': '#4f545c',// Вторичная кнопка (серая)
+          'button-secondary': '#383838',// Вторичная кнопка (темно-серая)
           'button-danger': '#ed4245',   // Кнопка опасности (красная)
-          text: '#dcddde',         // Основной текст (светло-серый)
-          'text-secondary': '#b9bbbe', // Вторичный текст (темнее серого)
-          'text-muted': '#72767d',     // Приглушенный текст
+          text: '#e1e1e1',         // Основной текст (почти белый)
+          'text-secondary': '#a8a8a8', // Вторичный текст
+          'text-muted': '#717171',     // Приглушенный текст
           'text-link': '#00aff4',      // Ссылки (голубой)
           info: '#5865f2',        // Цвет информационных сообщений
           success: '#3ba55c',      // Цвет успеха (зеленый)
           warning: '#faa61a',      // Цвет предупреждения (оранжевый)
           danger: '#ed4245',       // Цвет опасности (красный)
           accent: '#5865f2',       // Акцентный цвет (фиолетовый)
-          border: '#202225',       // Цвет границ
+          border: '#383838',       // Цвет границ для разделения
         }
         // background: "var(--background)", // Remove or keep if needed elsewhere
         // foreground: "var(--foreground)", // Remove or keep if needed elsewhere

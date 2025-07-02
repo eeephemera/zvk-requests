@@ -8,10 +8,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/eeephemera/zvk-requests/db"
-	"github.com/eeephemera/zvk-requests/middleware"
-	"github.com/eeephemera/zvk-requests/models"
-	"github.com/eeephemera/zvk-requests/utils"
+	"github.com/eeephemera/zvk-requests/server/db"
+	"github.com/eeephemera/zvk-requests/server/middleware"
+	"github.com/eeephemera/zvk-requests/server/models"
+	"github.com/eeephemera/zvk-requests/server/utils"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -70,35 +70,39 @@ type PartnerRepositoryInterface interface {
 // --- Предполагаемая структура обработчика ---
 // (Замените на вашу реальную структуру)
 type AuthHandler struct {
-	UserRepo    UserRepositoryInterface
-	PartnerRepo PartnerRepositoryInterface
+	UserRepo    *db.UserRepository
+	PartnerRepo *db.PartnerRepository
+}
+
+// NewAuthHandler создает новый экземпляр AuthHandler.
+func NewAuthHandler(userRepo *db.UserRepository, partnerRepo *db.PartnerRepository) *AuthHandler {
+	return &AuthHandler{UserRepo: userRepo, PartnerRepo: partnerRepo}
 }
 
 // RegisterUser обрабатывает регистрацию новых пользователей.
-func RegisterUser(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+func (h *AuthHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Login    string `json:"login"`
-		Password string `json:"password"`
+		Login     string `json:"login"`
+		Password  string `json:"password"`
+		Role      string `json:"role,omitempty"` // Роль опциональна, по умолчанию 'USER'
+		PartnerID *int   `json:"partner_id,omitempty"`
+		Name      string `json:"name,omitempty"`
+		Email     string `json:"email,omitempty"`
+		Phone     string `json:"phone,omitempty"`
 	}
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		RespondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	// Валидация логина
-	if len(req.Login) < 3 {
-		http.Error(w, "Логин должен содержать минимум 3 символа", http.StatusBadRequest)
-		return
-	}
-
-	// Валидация пароля
+	// Валидация
 	if err := utils.ValidatePassword(req.Password); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.Login) < 3 {
+		RespondWithError(w, http.StatusBadRequest, "Login must be at least 3 characters long")
 		return
 	}
 
@@ -106,90 +110,63 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	hashedPassword, err := utils.HashPassword(req.Password)
 	if err != nil {
 		log.Printf("Password hashing failed: %v", err)
-		http.Error(w, "Registration failed", http.StatusInternalServerError)
+		RespondWithError(w, http.StatusInternalServerError, "Registration failed")
 		return
 	}
 
-	// Устанавливаем роль пользователя принудительно как строку
-	role := models.RoleUser // Используем константу типа UserRole
-
-	// Сохранение в БД
-	conn, err := db.GetDBConnection(r.Context())
-	if err != nil {
-		log.Printf("Database connection error: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	// Создаем пользователя
+	user := &models.User{
+		Login:        req.Login,
+		PasswordHash: hashedPassword,
+		Role:         models.RoleUser,
+		PartnerID:    req.PartnerID,
+		Name:         &req.Name,
+		// Email будет обработан ниже, чтобы разрешить NULL значения
+		Phone: &req.Phone,
 	}
-	defer conn.Release()
 
-	query := `
-        INSERT INTO users (login, password_hash, role, created_at) 
-        VALUES ($1, $2, $3, $4) 
-        RETURNING id, login, role, created_at
-    `
-	var user models.User
-	err = conn.QueryRow(
-		r.Context(),
-		query,
-		req.Login,
-		hashedPassword,
-		string(role), // Преобразуем UserRole в string для передачи в БД
-		time.Now(),
-	).Scan(&user.ID, &user.Login, &user.Role, &user.CreatedAt)
+	// Если email предоставлен, устанавливаем его.
+	// Иначе он останется nil, что приведет к записи NULL в базу данных.
+	if req.Email != "" {
+		user.Email = &req.Email
+	}
 
-	if err != nil {
-		log.Printf("Database error: %v", err)
-		http.Error(w, "Registration failed", http.StatusInternalServerError)
+	if err := h.UserRepo.CreateUser(r.Context(), user); err != nil {
+		// Проверяем, является ли ошибка ошибкой нарушения уникальности
+		if db.IsUniqueConstraintViolation(err, "users_login_key") {
+			RespondWithError(w, http.StatusConflict, "User with this login already exists")
+			return
+		}
+		log.Printf("Failed to create user: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "Registration failed")
 		return
 	}
 
-	// Ответ без чувствительных данных
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	// Возвращаем пользователя (хеш пароля не включается благодаря `json:"-"`)
-	json.NewEncoder(w).Encode(user)
+	// Не возвращаем хеш пароля
+	user.PasswordHash = ""
+
+	RespondWithJSON(w, http.StatusCreated, user)
 }
 
 // LoginUser обрабатывает аутентификацию пользователей.
-func LoginUser(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		RespondWithError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	// Поиск пользователя в БД
-	conn, err := db.GetDBConnection(r.Context())
+	// Поиск пользователя в БД через репозиторий
+	user, err := h.UserRepo.GetUserByLogin(r.Context(), req.Login)
 	if err != nil {
-		log.Printf("Database connection error: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	defer conn.Release()
-
-	var user models.User
-	query := `
-        SELECT id, login, password_hash, role, name, email, phone, partner_id, created_at 
-        FROM users 
-        WHERE login = $1
-    `
-	err = conn.QueryRow(r.Context(), query, req.Login).Scan(
-		&user.ID,
-		&user.Login,
-		&user.PasswordHash, // Получаем хеш для проверки
-		&user.Role,
-		&user.Name, // Получаем доп. поля
-		&user.Email,
-		&user.Phone,
-		&user.PartnerID,
-		&user.CreatedAt,
-	)
-	if err != nil {
-		// Не сообщаем, что пользователь не существует
-		// Используем одинаковые сообщения об ошибке для безопасности
-		log.Printf("Login attempt failed for non-existent user: %s", req.Login)
-		time.Sleep(time.Duration(300+utils.RandomInt(500)) * time.Millisecond) // Защита от тайминг-атак
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		if err == db.ErrNotFound {
+			log.Printf("Login attempt failed for non-existent user: %s", req.Login)
+			time.Sleep(time.Duration(300+utils.RandomInt(500)) * time.Millisecond) // Защита от тайминг-атак
+			RespondWithError(w, http.StatusUnauthorized, "Invalid credentials")
+		} else {
+			log.Printf("Error fetching user by login %s: %v", req.Login, err)
+			RespondWithError(w, http.StatusInternalServerError, "Login failed")
+		}
 		return
 	}
 
@@ -197,7 +174,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	if err := utils.CheckPasswordHash(req.Password, user.PasswordHash); err != nil {
 		log.Printf("Password mismatch for user %s", user.Login)
 		time.Sleep(time.Duration(300+utils.RandomInt(500)) * time.Millisecond) // Защита от тайминг-атак
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		RespondWithError(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 
@@ -226,7 +203,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := token.SignedString(middleware.GetJWTSecret())
 	if err != nil {
 		log.Printf("JWT generation failed: %v", err)
-		http.Error(w, "Login failed", http.StatusInternalServerError)
+		RespondWithError(w, http.StatusInternalServerError, "Login failed")
 		return
 	}
 
@@ -234,11 +211,10 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	setTokenCookie(w, tokenString)
 
 	// Возвращаем данные пользователя в ответе
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(LoginResponse{
+	user.PasswordHash = "" // Убираем хеш перед отправкой
+	RespondWithJSON(w, http.StatusOK, LoginResponse{
 		Message: "Login successful",
-		User:    &user, // Включаем полные данные пользователя (кроме хеша пароля)
+		User:    user,
 	})
 }
 
@@ -306,7 +282,7 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	// Получаем ID пользователя из контекста
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {
-		http.Error(w, "User ID not found in context", http.StatusUnauthorized)
+		RespondWithError(w, http.StatusUnauthorized, "User not authenticated")
 		return
 	}
 
@@ -323,15 +299,16 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		partner, err := h.PartnerRepo.GetPartnerByID(r.Context(), *user.PartnerID)
 		if err != nil {
 			log.Printf("Error fetching partner data: %v", err)
-			// Не возвращаем ошибку, продолжаем без данных партнера
+			// Не блокируем ответ, если партнера не удалось найти, просто не добавляем его
 		} else {
 			user.Partner = partner
 		}
 	}
 
-	// Возвращаем данные пользователя
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	// Убираем хеш перед отправкой
+	user.PasswordHash = ""
+
+	RespondWithJSON(w, http.StatusOK, user)
 }
 
 func LogoutUser(w http.ResponseWriter, r *http.Request) {

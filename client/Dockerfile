@@ -3,13 +3,13 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Копируем package.json и package-lock.json
-COPY client/package*.json ./
+COPY package*.json ./
 
 # Устанавливаем зависимости
 RUN npm ci
 
 # Копируем исходники
-COPY client/ ./
+COPY . ./
 
 # Собираем приложение
 RUN npm run build
@@ -27,7 +27,7 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/next.config.js ./
+COPY --from=builder /app/next.config.mjs ./
 
 # Открываем порт
 EXPOSE 3000

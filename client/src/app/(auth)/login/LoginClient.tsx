@@ -176,7 +176,7 @@ export default function LoginClient() {
 
   return (
     <ProtectedRoute isPublicPage={true}>
-      <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="min-h-screen flex items-center justify-center p-6 bg-discord-background">
         <div className="bg-discord-card rounded-lg shadow-lg w-full max-w-md p-6">
           <h1 className="text-2xl font-bold text-discord-text flex items-center mb-6">
             <span className="bg-discord-accent h-8 w-1 rounded-full mr-3"></span>
@@ -200,7 +200,7 @@ export default function LoginClient() {
                 id="login"
                 type="text"
                 placeholder="Введите логин"
-                className={`block w-full px-4 py-2 rounded-md bg-discord-input border border-discord-border focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.login ? 'border-discord-danger' : 'border-discord-border'}`}
+                className={`block w-full px-4 py-2 rounded-md bg-discord-input border text-discord-text placeholder:text-discord-text-muted focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.login ? 'border-discord-danger' : 'border-discord-border'}`}
                 {...register("login", { 
                   required: "Логин обязателен", 
                   minLength: {
@@ -222,13 +222,13 @@ export default function LoginClient() {
                   id="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Введите пароль"
-                  className={`block w-full px-4 py-2 rounded-md bg-discord-input border pr-20 focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.password ? 'border-discord-danger' : 'border-discord-border'}`}
+                  className={`block w-full px-4 py-2 rounded-md bg-discord-input border pr-20 text-discord-text placeholder:text-discord-text-muted focus:outline-none focus:ring-2 focus:ring-discord-accent focus:border-transparent transition duration-150 ${errors.password ? 'border-discord-danger' : 'border-discord-border'}`}
                   {...register("password", { required: "Пароль обязателен" })}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-discord-text-muted hover:text-discord-text transition-colors text-sm"
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-discord-text-muted hover:text-discord-text transition-colors duration-200 text-sm"
                 >
                   {showPassword ? "Скрыть" : "Показать"}
                 </button>
@@ -266,7 +266,7 @@ export default function LoginClient() {
 
           <p className="mt-5 text-center text-discord-text-muted text-sm">
             Нет аккаунта?{" "}
-            <Link href="/register" className="text-discord-accent hover:underline">
+            <Link href="/register" className="text-discord-accent hover:underline transition-colors duration-200">
               Зарегистрироваться
             </Link>
           </p>

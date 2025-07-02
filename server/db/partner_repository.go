@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/eeephemera/zvk-requests/models"
+	"github.com/eeephemera/zvk-requests/server/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

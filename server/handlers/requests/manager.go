@@ -3,15 +3,14 @@ package requests
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 
-	"github.com/eeephemera/zvk-requests/db"
-	"github.com/eeephemera/zvk-requests/handlers"
-	"github.com/eeephemera/zvk-requests/middleware"
-	"github.com/eeephemera/zvk-requests/models"
+	"github.com/eeephemera/zvk-requests/server/db"
+	"github.com/eeephemera/zvk-requests/server/handlers"
+	"github.com/eeephemera/zvk-requests/server/middleware"
+	"github.com/eeephemera/zvk-requests/server/models"
 	"github.com/gorilla/mux"
 )
 
@@ -41,20 +40,19 @@ func (h *RequestHandler) UpdateRequestStatusHandler(w http.ResponseWriter, r *ht
 
 	// 3. Декодируем тело запроса (ожидаем JSON с новым статусом и комментарием)
 	var payload struct {
-		Status  string `json:"status"`
-		Comment string `json:"comment"`
+		Status  models.RequestStatus `json:"status"`
+		Comment string               `json:"comment"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
 
-	// 4. Проверяем, что статус валиден (можно добавить больше проверок)
-	if payload.Status == "" {
-		handlers.RespondWithError(w, http.StatusBadRequest, "Status cannot be empty")
+	// 4. Проверяем, что статус валиден
+	if !isValidRequestStatus(payload.Status) {
+		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid status value")
 		return
 	}
-	// TODO: Добавить валидацию на допустимые значения статуса
 
 	// 5. Проверяем права доступа менеджера к этой заявке
 	hasAccess, err := h.Repo.CheckManagerAccess(r.Context(), managerID, requestID)
@@ -96,7 +94,7 @@ func (h *RequestHandler) ListManagerRequestsHandler(w http.ResponseWriter, r *ht
 	// Получаем параметры пагинации, фильтрации и сортировки из query string
 	pageStr := r.URL.Query().Get("page")
 	limitStr := r.URL.Query().Get("limit")
-	statusFilter := r.URL.Query().Get("status")
+	statusFilterStr := r.URL.Query().Get("status")
 	partnerFilter := r.URL.Query().Get("partner")
 	clientFilter := r.URL.Query().Get("client")
 	sortBy := r.URL.Query().Get("sortBy")
@@ -112,8 +110,17 @@ func (h *RequestHandler) ListManagerRequestsHandler(w http.ResponseWriter, r *ht
 	}
 	offset := (page - 1) * limit
 
+	var statusFilter models.RequestStatus
+	if statusFilterStr != "" {
+		statusFilter = models.RequestStatus(statusFilterStr)
+		if !isValidRequestStatus(statusFilter) {
+			handlers.RespondWithError(w, http.StatusBadRequest, "Invalid status filter value")
+			return
+		}
+	}
+
 	// Вызываем метод репозитория со всеми параметрами
-	requests, total, err := h.Repo.ListRequestsByManager(
+	requests, total, err := h.Repo.ListRequestsForManager(
 		r.Context(), managerID, limit, offset,
 		statusFilter, partnerFilter, clientFilter,
 		sortBy, sortOrder,
@@ -127,7 +134,7 @@ func (h *RequestHandler) ListManagerRequestsHandler(w http.ResponseWriter, r *ht
 	// Используем общую структуру PaginatedResponse (она должна быть определена в models или handlers)
 	// Предположим, она в models для консистентности
 	response := models.PaginatedResponse{
-		Items: requests, // ListRequestsByManager возвращает срез models.Request
+		Items: requests, // ListRequestsForManager возвращает срез models.Request
 		Total: total,
 		Page:  page,
 		Limit: limit,
@@ -222,73 +229,23 @@ func (h *RequestHandler) DeleteManagerRequestHandler(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DownloadRequestHandler - скачивание файла ТЗ (доступно и пользователю, и менеджеру с проверкой прав)
-func (h *RequestHandler) DownloadRequestHandler(w http.ResponseWriter, r *http.Request) {
-	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
-	if !ok {
-		handlers.RespondWithError(w, http.StatusUnauthorized, "User not authenticated")
-		return
-	}
-	role, _ := r.Context().Value(middleware.RoleKey).(string)
+// DownloadRequestHandler - УСТАРЕЛО. Будет удалено.
+// func (h *RequestHandler) DownloadRequestHandler(w http.ResponseWriter, r *http.Request) {
+// ...
+// }
 
-	vars := mux.Vars(r)
-	requestIDStr := vars["id"]
-	requestID, err := strconv.Atoi(requestIDStr)
-	if err != nil || requestID <= 0 {
-		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID format")
-		return
-	}
+// isValidRequestStatus проверяет, является ли переданный статус одним из допустимых.
+// Используем карту для быстрой проверки.
+var validStatuses = map[models.RequestStatus]struct{}{
+	"На рассмотрении": {},
+	"В работе":        {},
+	"На уточнении":    {},
+	"Одобрена":        {},
+	"Отклонена":       {},
+	"Завершена":       {},
+}
 
-	// Получаем детали заявки, чтобы проверить права и получить файл
-	req, err := h.Repo.GetRequestDetailsByID(r.Context(), requestID)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			handlers.RespondWithError(w, http.StatusNotFound, "Request not found")
-			return
-		}
-		log.Printf("DownloadRequestHandler: Error fetching details for request %d: %v", requestID, err)
-		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to fetch request details")
-		return
-	}
-
-	// Проверка прав доступа
-	hasAccess := false
-	if role == string(models.RoleUser) && req.PartnerUserID == userID {
-		hasAccess = true
-	} else if role == string(models.RoleManager) {
-		// Проверяем доступ менеджера
-		managerHasAccess, checkErr := h.Repo.CheckManagerAccess(r.Context(), userID, requestID)
-		if checkErr != nil {
-			log.Printf("DownloadRequestHandler: Error checking manager access for manager %d, request %d: %v", userID, requestID, checkErr)
-			handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to check access rights")
-			return
-		}
-		hasAccess = managerHasAccess
-	}
-
-	if !hasAccess {
-		handlers.RespondWithError(w, http.StatusForbidden, "You do not have permission to download this file")
-		return
-	}
-
-	// Проверяем, есть ли файл
-	if len(req.OverallTZFile) == 0 {
-		handlers.RespondWithError(w, http.StatusNotFound, "File not found for this request")
-		return
-	}
-
-	// Определяем имя файла (можно сделать умнее, если хранить имя в БД)
-	filename := fmt.Sprintf("tz_request_%d.file", requestID)
-	// Пытаемся определить Content-Type (простая реализация)
-	contentType := http.DetectContentType(req.OverallTZFile)
-
-	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Length", strconv.Itoa(len(req.OverallTZFile)))
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(req.OverallTZFile)
-	if err != nil {
-		// Логируем ошибку, но статус уже отправлен
-		log.Printf("DownloadRequestHandler: Error writing file for request %d: %v", requestID, err)
-	}
+func isValidRequestStatus(status models.RequestStatus) bool {
+	_, ok := validStatuses[status]
+	return ok
 }

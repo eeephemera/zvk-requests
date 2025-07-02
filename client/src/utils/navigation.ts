@@ -7,7 +7,6 @@ export const getHomepageForRole = (role: string | null): string => {
   // Normalize role to uppercase for consistent comparison
   const normalizedRole = role.toUpperCase();
   
-  // Handle both English and Russian role names
   if (normalizedRole === "MANAGER" || normalizedRole === "МЕНЕДЖЕР") {
     return "/manager";
   }

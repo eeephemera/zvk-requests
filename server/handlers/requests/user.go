@@ -9,16 +9,22 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/eeephemera/zvk-requests/db"
-	"github.com/eeephemera/zvk-requests/handlers" // Предполагаем, что хелперы тут
-	"github.com/eeephemera/zvk-requests/middleware"
-	"github.com/eeephemera/zvk-requests/models"
+	"github.com/eeephemera/zvk-requests/server/db"
+	"github.com/eeephemera/zvk-requests/server/handlers" // Предполагаем, что хелперы тут
+	"github.com/eeephemera/zvk-requests/server/middleware"
+	"github.com/eeephemera/zvk-requests/server/models"
 	"github.com/gorilla/mux"
+	"github.com/shopspring/decimal"
 )
 
 // CreateRequestHandlerNew - Создание новой заявки по новой схеме.
 // Ожидает multipart/form-data с полем 'request_data' (JSON) и 'overall_tz_file' (файл).
 func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.Request) {
+	// --- ДИАГНОСТИЧЕСКОЕ ЛОГИРОВАНИЕ ---
+	log.Println("--- CreateRequestHandlerNew: Входящий запрос на создание заявки ---")
+	log.Printf("Заголовок Content-Type: %s", r.Header.Get("Content-Type"))
+	// --- КОНЕЦ ЛОГИРОВАНИЯ ---
+
 	// 1. Получаем ID пользователя из контекста
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
 	if !ok {
@@ -45,10 +51,26 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 	// 3. Парсим multipart form
 	// Увеличиваем лимит, если файлы могут быть большими (например, 32MB)
 	err = r.ParseMultipartForm(32 << 20)
+	log.Printf("Результат ParseMultipartForm (nil - это хорошо): %v", err) // Логируем ошибку парсинга
 	if err != nil {
 		handlers.RespondWithError(w, http.StatusBadRequest, "Failed to parse multipart form: "+err.Error())
 		return
 	}
+
+	// --- ДИАГНОСТИЧЕСКОЕ ЛОГИРОВАНИЕ: ПРОВЕРКА КЛЮЧЕЙ ФОРМЫ ---
+	if r.MultipartForm != nil {
+		log.Println("Полученные ключи в multipart form (текстовые поля):")
+		for key := range r.MultipartForm.Value {
+			log.Printf("- %s", key)
+		}
+		log.Println("Полученные ключи в multipart form (файлы):")
+		for key := range r.MultipartForm.File {
+			log.Printf("- %s", key)
+		}
+	} else {
+		log.Println("r.MultipartForm пуст (is nil)")
+	}
+	// --- КОНЕЦ ДИАГНОСТИЧЕСКОГО ЛОГИРОВАНИЯ ---
 
 	// 4. Получаем JSON данные из поля 'request_data'
 	requestDataJSON := r.FormValue("request_data")
@@ -60,21 +82,23 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 	// 5. Десериализуем JSON в структуру DTO (или напрямую в Request, если поля совпадают)
 	// Используем временную структуру DTO, чтобы отделить данные запроса от полной модели
 	var requestDTO struct {
-		EndClientINN             string               `json:"end_client_inn"` // ИНН для поиска/создания клиента
-		EndClientName            string               `json:"end_client_name"`
-		EndClientCity            string               `json:"end_client_city"`
-		EndClientFullAddress     string               `json:"end_client_full_address"`
-		EndClientContactDetails  string               `json:"end_client_contact_details"`
-		EndClientDetailsOverride string               `json:"end_client_details_override"` // Если ИНН не указан
-		DistributorID            *int                 `json:"distributor_id"`
-		PartnerContactOverride   string               `json:"partner_contact_override"`
-		FZLawType                string               `json:"fz_law_type"`
-		MPTRegistryType          string               `json:"mpt_registry_type"`
-		PartnerActivities        string               `json:"partner_activities"`
-		DealStateDescription     string               `json:"deal_state_description"`
-		EstimatedCloseDateStr    string               `json:"estimated_close_date"` // Дата как строка YYYY-MM-DD
-		Items                    []models.RequestItem `json:"items"`
-		Status                   string               `json:"status"` // Позволяем установить начальный статус? Или всегда default?
+		EndClientINN             string `json:"end_client_inn"` // ИНН для поиска/создания клиента
+		EndClientName            string `json:"end_client_name"`
+		EndClientCity            string `json:"end_client_city"`
+		EndClientFullAddress     string `json:"end_client_full_address"`
+		EndClientContactDetails  string `json:"end_client_contact_details"`
+		EndClientDetailsOverride string `json:"end_client_details_override"` // Если ИНН не указан
+		DistributorID            *int   `json:"distributor_id"`
+		PartnerContactOverride   string `json:"partner_contact_override"`
+		FZLawType                string `json:"fz_law_type"`
+		MPTRegistryType          string `json:"mpt_registry_type"`
+		PartnerActivities        string `json:"partner_activities"`
+		DealStateDescription     string `json:"deal_state_description"`
+		EstimatedCloseDateStr    string `json:"estimated_close_date"` // Дата как строка YYYY-MM-DD
+		// Новые поля для упрощенной модели
+		ProjectName string  `json:"project_name"`
+		Quantity    *int    `json:"quantity"`
+		UnitPrice   *string `json:"unit_price"` // Принимаем как строку для гибкости
 	}
 
 	if err := json.Unmarshal([]byte(requestDataJSON), &requestDTO); err != nil {
@@ -123,29 +147,69 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 		estimatedCloseDate = &parsedDate
 	}
 
-	// 8. Обрабатываем файл (если есть)
-	var fileBytes []byte
-	file, _, err := r.FormFile("overall_tz_file")
-	if err == nil { // Файл был прислан
-		defer file.Close()
-		fileBytes, err = io.ReadAll(file)
+	// 8. Обрабатываем файлы (если есть)
+	var fileIDs []int
+	// Ключ 'overall_tz_files[]' должен соответствовать тому, как FormData на клиенте добавляет файлы
+	uploadedFiles := r.MultipartForm.File["overall_tz_files[]"]
+	if len(uploadedFiles) > 0 {
+		log.Printf("Получено %d файлов для загрузки", len(uploadedFiles))
+		for _, fileHeader := range uploadedFiles {
+			file, err := fileHeader.Open()
+			if err != nil {
+				log.Printf("CreateRequestHandlerNew: Error opening uploaded file %s: %v", fileHeader.Filename, err)
+				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to process uploaded file")
+				return
+			}
+			defer file.Close()
+
+			fileBytes, err := io.ReadAll(file)
+			if err != nil {
+				log.Printf("CreateRequestHandlerNew: Error reading uploaded file %s: %v", fileHeader.Filename, err)
+				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to read uploaded file")
+				return
+			}
+
+			newFile := &models.File{
+				FileName: fileHeader.Filename,
+				MimeType: fileHeader.Header.Get("Content-Type"),
+				FileSize: fileHeader.Size,
+				FileData: fileBytes,
+			}
+
+			fileID, err := h.Repo.CreateFile(r.Context(), newFile)
+			if err != nil {
+				log.Printf("CreateRequestHandlerNew: Error saving file %s to DB: %v", fileHeader.Filename, err)
+				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to save file to database")
+				return
+			}
+			fileIDs = append(fileIDs, fileID)
+		}
+	}
+
+	// Обрабатываем и вычисляем цены
+	var unitPriceDecimal *decimal.Decimal
+	var totalPrice *decimal.Decimal
+	if requestDTO.UnitPrice != nil && *requestDTO.UnitPrice != "" {
+		parsedPrice, err := decimal.NewFromString(*requestDTO.UnitPrice)
 		if err != nil {
-			log.Printf("CreateRequestHandlerNew: Error reading uploaded file for user %d: %v", userID, err)
-			handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to read uploaded file")
+			handlers.RespondWithError(w, http.StatusBadRequest, "Invalid format for unit_price")
 			return
 		}
-	} else if !errors.Is(err, http.ErrMissingFile) {
-		// Была другая ошибка при попытке получить файл
-		handlers.RespondWithError(w, http.StatusBadRequest, "Error processing uploaded file: "+err.Error())
-		return
-	} // Если http.ErrMissingFile - просто пропускаем, файл не обязателен
+		unitPriceDecimal = &parsedPrice
+	}
+
+	if requestDTO.Quantity != nil && unitPriceDecimal != nil {
+		quantityDecimal := decimal.NewFromInt32(int32(*requestDTO.Quantity))
+		calculatedTotal := quantityDecimal.Mul(*unitPriceDecimal)
+		totalPrice = &calculatedTotal
+	}
 
 	// 9. Собираем основной объект заявки
 	req := &models.Request{
 		PartnerUserID:            userID,
-		PartnerID:                *user.PartnerID,                                  // Мы проверили, что PartnerID не nil
-		EndClientID:              endClientID,                                      // Может быть nil
-		EndClientDetailsOverride: stringToPtr(requestDTO.EndClientDetailsOverride), // Используется, если EndClientID is nil или для доп. информации
+		PartnerID:                *user.PartnerID,
+		EndClientID:              endClientID,
+		EndClientDetailsOverride: stringToPtr(requestDTO.EndClientDetailsOverride),
 		DistributorID:            requestDTO.DistributorID,
 		PartnerContactOverride:   stringToPtr(requestDTO.PartnerContactOverride),
 		FZLawType:                stringToPtr(requestDTO.FZLawType),
@@ -153,16 +217,15 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 		PartnerActivities:        stringToPtr(requestDTO.PartnerActivities),
 		DealStateDescription:     stringToPtr(requestDTO.DealStateDescription),
 		EstimatedCloseDate:       estimatedCloseDate,
-		OverallTZFile:            fileBytes,
-		Items:                    requestDTO.Items,
-		// Status: requestDTO.Status, // Обычно статус устанавливается по умолчанию или логикой бэкенда
-		Status: "На рассмотрении", // Устанавливаем по умолчанию здесь
+		ProjectName:              stringToPtr(requestDTO.ProjectName),
+		Quantity:                 requestDTO.Quantity,
+		UnitPrice:                unitPriceDecimal,
+		TotalPrice:               totalPrice,
+		Status:                   models.StatusPending,
 	}
 
-	// Валидация Items (например, проверка Quantity > 0) может быть добавлена здесь
-
-	// 10. Создаем заявку в БД
-	if err := h.Repo.CreateRequest(r.Context(), req); err != nil {
+	// 10. Создаем заявку в БД, передавая ID загруженных файлов
+	if err := h.Repo.CreateRequest(r.Context(), req, fileIDs); err != nil {
 		log.Printf("CreateRequestHandlerNew: Error calling repository CreateRequest for user %d: %v", userID, err)
 		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to save request")
 		return
@@ -213,8 +276,8 @@ func (h *RequestHandler) ListMyRequestsHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Создаем структуру для ответа
-	response := models.PaginatedResponse{
-		Items: requests, // Метод ListRequestsByUser уже возвращает нужные поля для списка
+	response := PaginatedResponse{
+		Items: requests,
 		Total: total,
 		Page:  page,
 		Limit: limit,

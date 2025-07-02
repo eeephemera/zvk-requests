@@ -9,11 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eeephemera/zvk-requests/db"
-	"github.com/eeephemera/zvk-requests/handlers"
-	"github.com/eeephemera/zvk-requests/handlers/requests"
-	"github.com/eeephemera/zvk-requests/middleware"
-	"github.com/eeephemera/zvk-requests/models"
+	"github.com/eeephemera/zvk-requests/server/db"
+	"github.com/eeephemera/zvk-requests/server/handlers"
+	requests_handler "github.com/eeephemera/zvk-requests/server/handlers/requests"
+	"github.com/eeephemera/zvk-requests/server/middleware"
+	"github.com/eeephemera/zvk-requests/server/models"
+
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
@@ -60,17 +61,12 @@ func main() {
 	userRepo := db.NewUserRepository(pool)
 	partnerRepo := db.NewPartnerRepository(pool)
 	endClientRepo := db.NewEndClientRepository(pool)
-	productRepo := db.NewProductRepository(pool)
 	requestRepo := db.NewRequestRepository(pool)
 
 	// Инициализируем обработчики
-	requestHandler := requests.NewRequestHandler(requestRepo, userRepo, partnerRepo, endClientRepo, productRepo)
-	authHandler := &handlers.AuthHandler{
-		UserRepo:    userRepo,
-		PartnerRepo: partnerRepo,
-	}
+	requestHandler := requests_handler.NewRequestHandler(requestRepo, userRepo, partnerRepo, endClientRepo)
+	authHandler := handlers.NewAuthHandler(userRepo, partnerRepo)
 	partnerHandler := handlers.NewPartnerHandler(partnerRepo)
-	productHandler := handlers.NewProductHandler(productRepo)
 	endClientHandler := handlers.NewEndClientHandler(endClientRepo)
 
 	// Создаем основной роутер
@@ -119,13 +115,13 @@ func main() {
 	// Специальный rate limiter для авторизации (более строгий: 10 запросов в минуту)
 	loginLimiter := middleware.NewRateLimiter(1*time.Minute, 10)
 
-	// Публичные маршруты (используем функции из пакета handlers)
-	r.HandleFunc("/api/register", handlers.RegisterUser).Methods("POST")
+	// Публичные маршруты
+	r.HandleFunc("/api/register", authHandler.RegisterUser).Methods("POST")
 
 	// Применяем более строгий rate limiter к маршруту login
 	loginRouter := r.PathPrefix("/api/login").Subrouter()
 	loginRouter.Use(loginLimiter.LimitByPath([]string{"/api/login"}, 10))
-	loginRouter.HandleFunc("", handlers.LoginUser).Methods("POST")
+	loginRouter.HandleFunc("", authHandler.LoginUser).Methods("POST")
 
 	r.HandleFunc("/api/logout", handlers.LogoutUser).Methods("POST")
 
@@ -138,24 +134,26 @@ func main() {
 
 	// --- Новые маршруты для справочников ---
 	authRouter.HandleFunc("/partners", partnerHandler.ListPartnersHandler).Methods("GET", "OPTIONS")
-	authRouter.HandleFunc("/products", productHandler.ListProductsHandler).Methods("GET", "OPTIONS")
 	authRouter.HandleFunc("/end-clients/search", endClientHandler.SearchByINNHandler).Methods("GET", "OPTIONS")
 
-	// --- Маршруты для пользователей (USER) ---
-	userReqRouter := authRouter.PathPrefix("/requests").Subrouter()
-	userReqRouter.Use(middleware.RequireRole(string(models.RoleUser)))
-	userReqRouter.HandleFunc("", requestHandler.CreateRequestHandlerNew).Methods("POST")
-	userReqRouter.HandleFunc("/my", requestHandler.ListMyRequestsHandler).Methods("GET")
-	userReqRouter.HandleFunc("/my/{id:[0-9]+}", requestHandler.GetMyRequestDetailsHandler).Methods("GET")
-	userReqRouter.HandleFunc("/download/{id:[0-9]+}", requestHandler.DownloadRequestHandler).Methods("GET")
+	// --- Маршруты для партнеров (USER) ---
+	userRouter := authRouter.PathPrefix("/requests").Subrouter()
+	userRouter.Use(middleware.RequireRole(string(models.RoleUser)))
+	userRouter.HandleFunc("", requestHandler.CreateRequestHandlerNew).Methods("POST")
+	userRouter.HandleFunc("/my", requestHandler.ListMyRequestsHandler).Methods("GET")
+	userRouter.HandleFunc("/my/{id:[0-9]+}", requestHandler.GetMyRequestDetailsHandler).Methods("GET")
+	// Новый роут для скачивания файла по его ID
+	userRouter.HandleFunc("/files/{fileID:[0-9]+}", requestHandler.DownloadFileHandler).Methods("GET")
 
 	// --- Маршруты для менеджеров (MANAGER) ---
-	managerReqRouter := authRouter.PathPrefix("/manager/requests").Subrouter()
-	managerReqRouter.Use(middleware.RequireRole(string(models.RoleManager)))
-	managerReqRouter.HandleFunc("", requestHandler.ListManagerRequestsHandler).Methods("GET")
-	managerReqRouter.HandleFunc("/{id:[0-9]+}", requestHandler.GetManagerRequestDetailsHandler).Methods("GET")
-	managerReqRouter.HandleFunc("/{id:[0-9]+}/status", requestHandler.UpdateRequestStatusHandler).Methods("PUT")
-	managerReqRouter.HandleFunc("/{id:[0-9]+}", requestHandler.DeleteManagerRequestHandler).Methods("DELETE")
+	managerRouter := authRouter.PathPrefix("/manager/requests").Subrouter()
+	managerRouter.Use(middleware.RequireRole(string(models.RoleManager)))
+	// Сначала определяем более конкретные маршруты
+	managerRouter.HandleFunc("/{id:[0-9]+}/status", requestHandler.UpdateRequestStatusHandler).Methods("PUT")
+	// Затем общие
+	managerRouter.HandleFunc("", requestHandler.ListManagerRequestsHandler).Methods("GET")
+	managerRouter.HandleFunc("/{id:[0-9]+}", requestHandler.GetManagerRequestDetailsHandler).Methods("GET")
+	managerRouter.HandleFunc("/{id:[0-9]+}", requestHandler.DeleteManagerRequestHandler).Methods("DELETE")
 
 	// Создаем HTTP сервер
 	server := &http.Server{

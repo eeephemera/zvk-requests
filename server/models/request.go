@@ -1,8 +1,24 @@
 package models
 
-import "time"
+import (
+	"time"
 
-// Request представляет заявку на регистрацию проекта
+	"github.com/shopspring/decimal"
+)
+
+// RequestStatus определяет возможные статусы заявок
+type RequestStatus string
+
+const (
+	StatusPending    RequestStatus = "На рассмотрении"
+	StatusApproved   RequestStatus = "Одобрено"
+	StatusRejected   RequestStatus = "Отклонено"
+	StatusClarify    RequestStatus = "Требует уточнения"
+	StatusInProgress RequestStatus = "В работе"
+	StatusCompleted  RequestStatus = "Выполнено"
+)
+
+// Request представляет основную сущность "Заявка на регистрацию сделки".
 type Request struct {
 	ID                       int           `json:"id"`
 	PartnerUserID            int           `json:"partner_user_id"`
@@ -16,25 +32,26 @@ type Request struct {
 	PartnerActivities        *string       `json:"partner_activities,omitempty"`
 	DealStateDescription     *string       `json:"deal_state_description,omitempty"`
 	EstimatedCloseDate       *time.Time    `json:"estimated_close_date,omitempty"`
-	OverallTZFile            []byte        `json:"overall_tz_file,omitempty"`
-	Items                    []RequestItem `json:"items,omitempty"`
-	Status                   string        `json:"status"`
-	StatusHistory            []StatusEvent `json:"status_history,omitempty"`
+	Status                   RequestStatus `json:"status"`
 	ManagerComment           *string       `json:"manager_comment,omitempty"`
 	CreatedAt                time.Time     `json:"created_at"`
 	UpdatedAt                time.Time     `json:"updated_at"`
 
-	// Связанные данные
+	// Новые поля, перенесенные из request_items и добавленные
+	ProjectName *string          `json:"project_name,omitempty"`
+	Quantity    *int             `json:"quantity,omitempty"`
+	UnitPrice   *decimal.Decimal `json:"unit_price,omitempty"`
+	TotalPrice  *decimal.Decimal `json:"total_price,omitempty"`
+
+	// Связанные данные (вложенные объекты)
 	Partner     *Partner   `json:"partner,omitempty"`
 	EndClient   *EndClient `json:"end_client,omitempty"`
-	Distributor *Partner   `json:"distributor,omitempty"`
+	Distributor *Partner   `json:"distributor,omitempty"` // Дистрибьютор - это тоже партнер
 	User        *User      `json:"user,omitempty"`
 
-	// Поля для агрегации, не хранятся в requests таблице напрямую
-	Product *Product `json:"product,omitempty"`
-}
+	// Новое поле для хранения нескольких файлов
+	Files []*File `json:"files,omitempty"`
 
-// RequestItem представляет одну позицию в заявке - ЭТОТ БЛОК БУДЕТ УДАЛЕН
-// type RequestItem struct {
-// 	// ... existing code ...
-// }
+	// Поля для агрегации, которые не хранятся в таблице напрямую
+	TotalSum *decimal.Decimal `json:"total_sum,omitempty"`
+}
