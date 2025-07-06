@@ -95,7 +95,7 @@ func (h *RequestHandler) ListManagerRequestsHandler(w http.ResponseWriter, r *ht
 	pageStr := r.URL.Query().Get("page")
 	limitStr := r.URL.Query().Get("limit")
 	statusFilterStr := r.URL.Query().Get("status")
-	partnerFilter := r.URL.Query().Get("partner")
+	partnerFilter := r.URL.Query().Get("organization_name")
 	clientFilter := r.URL.Query().Get("client")
 	sortBy := r.URL.Query().Get("sortBy")
 	sortOrder := r.URL.Query().Get("sortOrder") // ASC или DESC
@@ -236,16 +236,17 @@ func (h *RequestHandler) DeleteManagerRequestHandler(w http.ResponseWriter, r *h
 
 // isValidRequestStatus проверяет, является ли переданный статус одним из допустимых.
 // Используем карту для быстрой проверки.
-var validStatuses = map[models.RequestStatus]struct{}{
-	"На рассмотрении": {},
-	"В работе":        {},
-	"На уточнении":    {},
-	"Одобрена":        {},
-	"Отклонена":       {},
-	"Завершена":       {},
-}
-
 func isValidRequestStatus(status models.RequestStatus) bool {
-	_, ok := validStatuses[status]
-	return ok
+	switch status {
+	case
+		"На рассмотрении",
+		"В работе",
+		"На уточнении",
+		"Одобрена",
+		"Отклонена",
+		"Завершена":
+		return true
+	default:
+		return false
+	}
 }

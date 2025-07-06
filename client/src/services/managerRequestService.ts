@@ -64,8 +64,7 @@ export async function updateRequestStatus(requestId: number, status: string, com
     throw new ApiError("Необходимо указать ID заявки и новый статус.", 400);
   }
   try {
-    // Убираем /api из пути, так как apiFetch его добавляет автоматически
-    return await apiFetch<Request>(`/manager/requests/${requestId}/status`, { 
+    return await apiFetch<Request>(`/api/manager/requests/${requestId}/status`, {
       method: 'PUT',
       body: JSON.stringify({ status, comment }), 
       headers: { 'Content-Type': 'application/json' }
