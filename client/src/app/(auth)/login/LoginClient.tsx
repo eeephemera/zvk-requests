@@ -159,9 +159,9 @@ export default function LoginClient() {
             Система предотвратила бесконечное перенаправление. Перейдите на нужную страницу вручную:
           </p>
           <div className="space-y-4">
-            <a href="/my-requests" className="block w-full py-2 text-center bg-discord-button-primary text-white rounded-md hover:bg-opacity-80">
+            <Link href="/my-requests" className="block w-full py-2 text-center bg-discord-button-primary text-white rounded-md hover:bg-opacity-80">
               Страница запросов
-            </a>
+            </Link>
             <Link href="/manager" className="block w-full py-2 text-center bg-discord-accent text-white rounded-md hover:bg-opacity-80">
               Панель менеджера
             </Link>

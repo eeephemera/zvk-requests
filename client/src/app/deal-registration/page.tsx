@@ -3,11 +3,9 @@
 import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import Header from '@/components/Header';
 import Link from 'next/link';
-import Image from 'next/image';
 
 import { findEndClientByINN, EndClient } from '@/services/endClientService';
 import { getCurrentUser, User } from '@/services/userService';
@@ -40,7 +38,6 @@ export default function DealRegistrationPage() {
     mode: 'onBlur' 
   });
 
-  const router = useRouter();
   const queryClient = useQueryClient();
 
   const [formError, setFormError] = useState<string | null>(null);
@@ -146,7 +143,7 @@ export default function DealRegistrationPage() {
     if (newFiles.length === 0) return;
 
     setFileError(null);
-    let allFiles = [...attachedFiles, ...newFiles];
+    const allFiles = [...attachedFiles, ...newFiles];
     let validationPassed = true;
 
     // Проверяем каждый файл
@@ -259,15 +256,12 @@ export default function DealRegistrationPage() {
         return;
     }
 
-    const attachmentFileList = formData.attachmentFile;
-    const filesArray = attachmentFileList ? Array.from(attachmentFileList) : [];
-
-    const { attachmentFile: formAttachmentFile, ...otherFormData } = formData;
+    const { attachmentFile, ...otherFormData } = formData;
 
     const apiData: ApiDealRegistrationData = {
         ...otherFormData,
         partnerId: currentUser.partner.id,
-        attachmentFiles: filesArray,
+        attachmentFiles: attachmentFile ? Array.from(attachmentFile) : [],
         onUploadProgress: (progress) => {
           setUploadProgress(progress);
         },

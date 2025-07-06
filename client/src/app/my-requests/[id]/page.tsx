@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { apiClient } from '@/services/apiClient';
-import { Request, Partner, EndClient, User, downloadFileById } from '@/services/requestService'; 
+import { apiClient, ApiError } from '@/services/apiClient';
+import { Request, downloadFileById } from '@/services/requestService'; 
 import { getStatusColor } from '../../../utils/statusUtils';
 import { formatDate } from '../../../utils/formatters';
 
@@ -54,8 +54,9 @@ export default function RequestDetailsPage() {
             a.click();
             a.remove();
             window.URL.revokeObjectURL(url);
-        } catch (err: any) {
-            setDownloadError(err.message || 'Не удалось скачать файл.');
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Не удалось скачать файл.';
+            setDownloadError(message);
             console.error(err);
         } finally {
             setDownloadingFileId(null);
@@ -71,11 +72,13 @@ export default function RequestDetailsPage() {
                     // Исправляем URL, чтобы он соответствовал API сервера для роута пользователя
                     const data = await apiClient.get<Request>(`/api/requests/my/${id}`);
                     setRequest(data);
-                } catch (err: any) {
-                    if (err.status === 404) {
+                } catch (err: unknown) {
+                    if (err instanceof ApiError && err.status === 404) {
                          setError('Заявка с таким ID не найдена или у вас нет к ней доступа.');
-                    } else {
+                    } else if (err instanceof Error) {
                          setError(err.message || 'Не удалось загрузить данные заявки.');
+                    } else {
+                        setError('Неизвестная ошибка при загрузке данных.');
                     }
                     console.error(err);
                 } finally {
