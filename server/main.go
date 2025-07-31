@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 
 	"github.com/eeephemera/zvk-requests/server/db"
@@ -21,7 +20,7 @@ import (
 
 func main() {
 	// Загружаем переменные окружения
-	if err := godotenv.Load(); err != nil {
+	if err := godotenv.Load("/app/config.env"); err != nil {
 		log.Println("Warning: .env file not found or error loading it")
 	}
 
@@ -72,42 +71,48 @@ func main() {
 	// Создаем основной роутер
 	r := mux.NewRouter()
 
+	// Health check endpoint
+	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}).Methods("GET", "OPTIONS")
+
 	// Инициализируем RateLimiter
 	rateLimiter := middleware.NewRateLimiter(1*time.Minute, 100) // 100 запросов в минуту
 
-	// CORS middleware
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Получаем список разрешенных доменов из переменной окружения
-			allowedOrigins := strings.Split(os.Getenv("CORS_ALLOWED_ORIGINS"), ",")
+	// CORS middleware (УДАЛЕНО, теперь обрабатывается Nginx)
+	// r.Use(func(next http.Handler) http.Handler {
+	// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// 		// Получаем список разрешенных доменов из переменной окружения
+	// 		allowedOrigins := strings.Split(os.Getenv("CORS_ALLOWED_ORIGINS"), ",")
 
-			origin := r.Header.Get("Origin")
+	// 		origin := r.Header.Get("Origin")
 
-			// Проверяем, входит ли origin в список разрешенных
-			allowed := false
-			for _, allowedOrigin := range allowedOrigins {
-				if origin == strings.TrimSpace(allowedOrigin) {
-					allowed = true
-					break
-				}
-			}
+	// 		// Проверяем, входит ли origin в список разрешенных
+	// 		allowed := false
+	// 		for _, allowedOrigin := range allowedOrigins {
+	// 			if origin == strings.TrimSpace(allowedOrigin) {
+	// 				allowed = true
+	// 				break
+	// 			}
+	// 		}
 
-			if allowed {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
-			}
+	// 		if allowed {
+	// 			w.Header().Set("Access-Control-Allow-Origin", origin)
+	// 			w.Header().Set("Access-Control-Allow-Credentials", "true")
+	// 		}
 
-			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie")
-			w.Header().Set("Access-Control-Expose-Headers", "Set-Cookie")
+	// 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE, OPTIONS")
+	// 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie")
+	// 		w.Header().Set("Access-Control-Expose-Headers", "Set-Cookie")
 
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	})
+	// 		if r.Method == "OPTIONS" {
+	// 			w.WriteHeader(http.StatusOK)
+	// 			return
+	// 		}
+	// 		next.ServeHTTP(w, r)
+	// 	})
+	// })
 
 	// Базовый rate limiter для всех запросов
 	r.Use(rateLimiter.LimitByIP)

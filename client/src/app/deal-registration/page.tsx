@@ -149,7 +149,7 @@ export default function DealRegistrationPage() {
     // Проверяем каждый файл
     const maxSize = 15 * 1024 * 1024;
     allFiles.forEach(file => {
-      if (file.size > maxSize) {
+    if (file.size > maxSize) {
         setFileError(`Файл "${file.name}" превышает лимит в 15 МБ.`);
         validationPassed = false;
       }
@@ -158,11 +158,11 @@ export default function DealRegistrationPage() {
     if (!validationPassed) {
       // Очищаем input, чтобы можно было выбрать тот же файл снова после ошибки
       if (attachmentFileRef.current) {
-        attachmentFileRef.current.value = '';
+         attachmentFileRef.current.value = '';
       }
       return;
     }
-    
+
     // Обновляем состояние react-hook-form
     const dataTransfer = new DataTransfer();
     allFiles.forEach(file => dataTransfer.items.add(file));
@@ -218,7 +218,7 @@ export default function DealRegistrationPage() {
     // Сбрасываем ошибку, если она была связана с размером
     if (fileError) {
       setFileError(null);
-    }
+      }
   };
 
   // --- Мутация для отправки формы --- 
@@ -629,22 +629,22 @@ export default function DealRegistrationPage() {
                         <div className="flex text-sm text-gray-500">
                           <label htmlFor="attachmentFile" className="relative cursor-pointer bg-discord-gray-light rounded-md font-medium text-indigo-400 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500 pointer-events-auto">
                             <span>{isDragging ? 'Отпустите, чтобы добавить' : 'Перетащите файлы сюда'}</span>
-                            <input
-                              id="attachmentFile"
-                              type="file"
+                    <input
+                      id="attachmentFile"
+                      type="file"
                               multiple // <<< Разрешаем выбор нескольких файлов
                               className="hidden"
                               {...attachmentFileRegisterProps}
-                              ref={(e) => {
+                       ref={(e) => {
                                 attachmentFileRefCallback(e);
                                 attachmentFileRef.current = e;
-                              }}
+                       }}
                               onChange={(e) => {
                                 attachmentFileRegisterProps.onChange(e);
                                 handleFileChange(e);
                               }}
                             />
-                          </label>
+                    </label>
                           <p className="pl-1 pointer-events-none">или нажмите, чтобы выбрать</p>
                         </div>
                         <p className="text-xs text-gray-400 pointer-events-none">
@@ -666,25 +666,25 @@ export default function DealRegistrationPage() {
                               <div
                                  className="absolute top-0 left-0 h-full bg-discord-accent/20 transition-all duration-300 ease-linear"
                                  style={{ width: `${uploadProgress}%` }}
-                              />
+                        />
                            )}
                            <div className="relative z-10 h-8 w-8 bg-discord-card rounded-md flex items-center justify-center mr-3 text-discord-accent text-lg">
                               📄
-                           </div>
+                        </div>
                            <div className="relative z-10 flex-1 overflow-hidden">
                               <div className="text-sm text-discord-text truncate" title={file.name}>{file.name}</div>
                               <div className="text-xs text-discord-text-muted">{(file.size / 1024).toFixed(1)} KB</div>
-                           </div>
-                           <button 
-                              type="button"
+                      </div>
+                      <button 
+                        type="button"
                               onClick={() => removeFile(file)}
                               className="relative z-10 ml-2 text-discord-text-muted hover:text-discord-danger transition-colors duration-200 p-1 rounded-full hover:bg-discord-danger/10"
                               aria-label={`Удалить файл ${file.name}`}
-                           >
-                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                           </button>
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                         </div>
                       ))}
                     </div>

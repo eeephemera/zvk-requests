@@ -82,17 +82,24 @@ func NewAuthHandler(userRepo *db.UserRepository, partnerRepo *db.PartnerReposito
 // RegisterUser обрабатывает регистрацию новых пользователей.
 func (h *AuthHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Login     string `json:"login"`
-		Password  string `json:"password"`
-		Role      string `json:"role,omitempty"` // Роль опциональна, по умолчанию 'USER'
-		PartnerID *int   `json:"partner_id,omitempty"`
-		Name      string `json:"name,omitempty"`
-		Email     string `json:"email,omitempty"`
-		Phone     string `json:"phone,omitempty"`
+		Login                string `json:"login"`
+		Password             string `json:"password"`
+		PasswordConfirmation string `json:"password_confirmation"`
+		Role                 string `json:"role,omitempty"` // Роль опциональна, по умолчанию 'USER'
+		PartnerID            *int   `json:"partner_id,omitempty"`
+		Name                 string `json:"name,omitempty"`
+		Email                string `json:"email,omitempty"`
+		Phone                string `json:"phone,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Валидация, что пароли совпадают
+	if req.Password != req.PasswordConfirmation {
+		RespondWithError(w, http.StatusBadRequest, "Пароли не совпадают")
 		return
 	}
 

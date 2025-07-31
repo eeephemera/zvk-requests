@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -10,60 +11,44 @@ import (
 )
 
 var (
-	pool        *pgxpool.Pool
-	connTimeout = 15 * time.Second
+	pool *pgxpool.Pool
 )
 
-type Config struct {
-	Host     string
-	Port     string
-	User     string
-	Password string
-	DBName   string
-	SSLMode  string
-}
-
-// ConnectDB инициализирует соединение с базой данных
+// ConnectDB устанавливает соединение с базой данных PostgreSQL.
+// Использует повторные попытки с экспоненциальной задержкой.
 func ConnectDB(ctx context.Context) error {
-	cfg := Config{
-		Host:     os.Getenv("DB_HOST"),
-		Port:     os.Getenv("DB_PORT"),
-		User:     os.Getenv("DB_USER"),
-		Password: os.Getenv("DB_PASSWORD"),
-		DBName:   os.Getenv("DB_NAME"),
-		SSLMode:  os.Getenv("DB_SSLMODE"),
-	}
-
-	connCtx, cancel := context.WithTimeout(ctx, connTimeout)
-	defer cancel()
-
-	connString := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode,
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		os.Getenv("DB_HOST"),
+		os.Getenv("DB_PORT"),
+		os.Getenv("DB_USER"),
+		os.Getenv("DB_PASSWORD"),
+		os.Getenv("DB_NAME"),
 	)
 
-	config, err := pgxpool.ParseConfig(connString)
-	if err != nil {
-		return fmt.Errorf("failed to parse connection config: %w", err)
+	maxAttempts := 10
+	currentAttempt := 0
+	for {
+		currentAttempt++
+		log.Printf("Попытка подключения к базе данных %d из %d...", currentAttempt, maxAttempts)
+		var err error
+		pool, err = pgxpool.New(ctx, connStr)
+		if err == nil {
+			err = pool.Ping(ctx)
+		}
+
+		if err == nil {
+			log.Println("Успешное подключение к базе данных!")
+			return nil
+		}
+
+		log.Printf("Ошибка подключения к базе данных: %v", err)
+		if currentAttempt >= maxAttempts {
+			return fmt.Errorf("не удалось подключиться к базе данных после %d попыток: %w", maxAttempts, err)
+		}
+
+		// Экспоненциальная задержка
+		time.Sleep(time.Duration(currentAttempt) * time.Second)
 	}
-
-	// Настройка пула соединений
-	config.MaxConns = 25
-	config.MinConns = 2
-	config.MaxConnLifetime = 1 * time.Hour
-	config.HealthCheckPeriod = 30 * time.Second
-
-	pool, err = pgxpool.NewWithConfig(connCtx, config)
-	if err != nil {
-		return fmt.Errorf("database connection failed: %w", err)
-	}
-
-	// Дополнительная проверка соединения
-	if err := pool.Ping(connCtx); err != nil {
-		return fmt.Errorf("database ping failed: %w", err)
-	}
-
-	return nil
 }
 
 // GetPool возвращает глобальный пул соединений

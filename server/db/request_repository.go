@@ -325,7 +325,7 @@ func (r *RequestRepository) ListRequestsByUser(ctx context.Context, userID int, 
 
 	// Теперь получаем сами заявки с JOIN'ами для отображения в списке
 	query := `
-		SELECT
+		SELECT 
 			r.id,
 			r.status,
 			r.created_at,
@@ -490,9 +490,7 @@ func pstr(s string) *string {
 	}
 	return &s
 }
-func pdecimal(d decimal.Decimal) *decimal.Decimal {
-	return &d
-}
+
 
 // ListAllRequests возвращает список всех заявок с пагинацией, фильтрацией и сортировкой.
 // Предназначен для роли Менеджера.
@@ -676,7 +674,7 @@ func (repo *RequestRepository) ListRequestsForManager(
 	sortOrder string,
 ) ([]models.Request, int64, error) {
 	baseQuery := `
-		FROM requests r
+			FROM requests r
 		LEFT JOIN users u ON r.partner_user_id = u.id
 		JOIN partners p ON r.partner_id = p.id
 		LEFT JOIN end_clients ec ON r.end_client_id = ec.id

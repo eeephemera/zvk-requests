@@ -160,28 +160,28 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to process uploaded file")
 				return
 			}
-			defer file.Close()
+		defer file.Close()
 
-			fileBytes, err := io.ReadAll(file)
-			if err != nil {
+		fileBytes, err := io.ReadAll(file)
+		if err != nil {
 				log.Printf("CreateRequestHandlerNew: Error reading uploaded file %s: %v", fileHeader.Filename, err)
-				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to read uploaded file")
-				return
-			}
+			handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to read uploaded file")
+			return
+		}
 
-			newFile := &models.File{
+		newFile := &models.File{
 				FileName: fileHeader.Filename,
 				MimeType: fileHeader.Header.Get("Content-Type"),
 				FileSize: fileHeader.Size,
-				FileData: fileBytes,
-			}
+			FileData: fileBytes,
+		}
 
-			fileID, err := h.Repo.CreateFile(r.Context(), newFile)
-			if err != nil {
+		fileID, err := h.Repo.CreateFile(r.Context(), newFile)
+		if err != nil {
 				log.Printf("CreateRequestHandlerNew: Error saving file %s to DB: %v", fileHeader.Filename, err)
-				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to save file to database")
-				return
-			}
+			handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to save file to database")
+			return
+		}
 			fileIDs = append(fileIDs, fileID)
 		}
 	}

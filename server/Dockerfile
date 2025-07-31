@@ -6,7 +6,11 @@ WORKDIR /app
 # Устанавливаем зависимости для компиляции
 RUN apk add --no-cache gcc g++ make git
 
-# Копируем go.mod и go.sum
+# Устанавливаем migrate
+RUN apk add --no-cache git && \
+    GOBIN=/go/bin go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
+# Кэшируем зависимости
 COPY go.mod go.sum ./
 
 # Загружаем зависимости
@@ -21,11 +25,21 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 # Конечный образ
 FROM alpine:latest
 
+# Устанавливаем make, чтобы можно было выполнять команды из Makefile
+RUN apk add --no-cache make
+
 WORKDIR /app
 
 # Копируем скомпилированное приложение
 COPY --from=builder /app/main .
-COPY --from=builder /app/.env .
+# Копируем .env файл под другим именем напрямую в конечный образ
+COPY .env /app/config.env
+# Копируем migrate ИЗ ЭТАПА СБОРКИ
+COPY --from=builder /go/bin/migrate /usr/local/bin/
+
+# Копируем Makefile и миграции ИЗ ЛОКАЛЬНОГО КОНТЕКСТА (папки server/)
+# COPY Makefile .
+COPY db/migrations ./db/migrations
 
 # Открываем порт
 EXPOSE 8081

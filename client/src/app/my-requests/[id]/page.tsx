@@ -149,42 +149,42 @@ export default function RequestDetailsPage() {
                     {/* Partner Details Section */}
                     <div className="border border-discord-border p-4 rounded-lg bg-discord-background space-y-2">
                         <h3 className="text-lg font-semibold text-discord-text mb-2">Партнер</h3>
-                        <DetailItem label="Название" value={request.partner?.name} />
-                        <DetailItem label="ИНН" value={request.partner?.inn} />
+                                    <DetailItem label="Название" value={request.partner?.name} />
+                                    <DetailItem label="ИНН" value={request.partner?.inn} />
                         <DetailItem label="Контакт (override)" value={request.partner_contact_override} />
                         <DetailItem label="Деятельность партнера" value={request.partner_activities} />
-                    </div>
+                            </div>
 
                     {/* End Client Details Section */}
                     <div className="border border-discord-border p-4 rounded-lg bg-discord-background space-y-2">
                         <h3 className="text-lg font-semibold text-discord-text mb-2">Конечный клиент</h3>
-                        <DetailItem label="Название" value={request.end_client?.name ?? request.end_client_details_override} />
-                        <DetailItem label="ИНН" value={request.end_client?.inn} />
-                        <DetailItem label="Город" value={request.end_client?.city} />
-                    </div>
+                                    <DetailItem label="Название" value={request.end_client?.name ?? request.end_client_details_override} />
+                                    <DetailItem label="ИНН" value={request.end_client?.inn} />
+                                    <DetailItem label="Город" value={request.end_client?.city} />
+                        </div>
 
                     {/* Deal & Status Section */}
                     <div className="border border-discord-border p-4 rounded-lg bg-discord-background space-y-2">
                         <h3 className="text-lg font-semibold text-discord-text mb-2">Параметры и Статус</h3>
-                        <DetailItem label="Закон" value={request.fz_law_type} />
-                        <DetailItem label="Реестр МПТ" value={request.mpt_registry_type} />
-                        <DetailItem label="Дата закрытия" value={request.estimated_close_date ? formatDate(request.estimated_close_date) : null} />
+                                    <DetailItem label="Закон" value={request.fz_law_type} />
+                                    <DetailItem label="Реестр МПТ" value={request.mpt_registry_type} />
+                                    <DetailItem label="Дата закрытия" value={request.estimated_close_date ? formatDate(request.estimated_close_date) : null} />
                         <div className="flex justify-between items-center py-1.5 px-2">
                             <span className="text-discord-text-muted font-medium text-sm">Текущий статус:</span>
-                            <span className={`px-3 py-1 text-sm rounded-full font-semibold ${getStatusColor(request.status)}`}>
-                                {request.status}
-                            </span>
+                                        <span className={`px-3 py-1 text-sm rounded-full font-semibold ${getStatusColor(request.status)}`}>
+                                            {request.status}
+                                        </span>
                         </div>
-                        <DetailItem label="Комментарий менеджера" value={request.manager_comment} />
+                            <DetailItem label="Комментарий менеджера" value={request.manager_comment} />
                     </div>
-
+                    
                     {/* File Download Section */}
                     {request.files && request.files.length > 0 && (
                         <div className="border border-discord-border p-4 rounded-lg bg-discord-background space-y-3">
                             <h3 className="text-lg font-semibold text-discord-text mb-2">Приложенные файлы</h3>
                             {request.files.map(file => (
                                 <div key={file.id} className="flex items-center justify-between p-2 rounded-md bg-discord-input hover:bg-discord-border">
-                                    <div>
+                                <div>
                                         <p className="text-discord-text font-medium text-sm">{file.file_name}</p>
                                         <p className="text-xs text-discord-text-muted">Размер: {Math.round(file.file_size / 1024)} KB</p>
                                     </div>
