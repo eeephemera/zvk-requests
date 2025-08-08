@@ -52,7 +52,8 @@ func setTokenCookie(w http.ResponseWriter, tokenString string) {
 		HttpOnly: true,
 		Secure:   isProduction, // Secure=true только в продакшене (HTTPS)
 		Path:     "/",
-		SameSite: http.SameSiteLaxMode, // Lax - хороший баланс
+		// Для работы с кросс-доменным фронтендом (Vercel) требуется SameSite=None
+		SameSite: http.SameSiteNoneMode,
 	}
 	http.SetCookie(w, cookie)
 }
