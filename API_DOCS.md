@@ -44,7 +44,7 @@ Register a new user account.
 {
   "login": "string",
   "password": "string",
-  "password_confirmation": "string",
+  "password_confirmation": "string (required)",
   "role": "string (optional, default: 'USER')",
   "partner_id": "integer (optional)",
   "name": "string (optional)",

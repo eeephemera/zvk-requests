@@ -1,0 +1,43 @@
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/zvk-requests
+            git pull origin main
+
+            # Создаем или обновляем корневой .env файл для Docker Compose (для PostgreSQL)
+            cat > .env << EOF
+            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+            EOF
+
+            # Создаем или обновляем server/.env файл для Go-сервера
+            # Используем те же данные для DB, но с host 'postgres' (имя сервиса Docker)
+            mkdir -p server # Убеждаемся, что директория server существует
+            cat > server/.env << EOF
+            DB_HOST=postgres
+            DB_PORT=5432
+            DB_USER=${{ secrets.POSTGRES_USER }}
+            DB_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            DB_NAME=${{ secrets.POSTGRES_DB }}
+            DB_SSLMODE=disable
+
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}
+
+            SERVER_PORT=${{ secrets.SERVER_PORT }}
+            APP_ENV=${{ secrets.APP_ENV }}
+
+            CORS_ALLOWED_ORIGINS=${{ secrets.CORS_ALLOWED_ORIGINS }}
+            EOF
+
+            docker compose -f docker-compose.secure.yml pull server
+            # Принудительно пересоздаем, чтобы новые .env файлы вступили в силу для postgres и server
+            docker compose -f docker-compose.secure.yml up -d --build --force-recreate
+            docker compose -f docker-compose.secure.yml ps
+
+            echo "Deployment completed successfully!"
