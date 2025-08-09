@@ -328,7 +328,8 @@ func LogoutUser(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   os.Getenv("APP_ENV") == "production", // Secure для продакшена
 		Path:     "/",
-		SameSite: http.SameSiteLaxMode,
+		// Важно: для удаления кросс-доменной куки нужно отдать её с теми же атрибутами SameSite=None
+		SameSite: http.SameSiteNoneMode,
 	}
 	http.SetCookie(w, cookie)
 

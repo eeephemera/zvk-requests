@@ -1,19 +1,16 @@
 "use client"; // Этот компонент использует хуки, поэтому он клиентский
 
 import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link'; // Для логотипа/ссылки на главную
 
 export default function Header() {
   // Получаем состояние аутентификации и функцию logout из контекста
   const { isAuthenticated, logout, userRole, userId } = useAuth();
-  const router = useRouter();
 
   // Функция обработки нажатия кнопки "Выйти"
   const handleLogout = async () => {
     await logout(); // Вызываем функцию logout из контекста
-    // После выхода перенаправляем пользователя на страницу входа
-    router.push('/login');
+    // Навигация выполняется внутри logout (AuthContext)
   };
 
   // Определяем текст роли для отображения
