@@ -214,7 +214,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       clearAuthCache();
       resetAuthState();
       window.location.replace('/login');
-    } catch (error) {
+    } catch {
       clearAuthCache();
       resetAuthState();
     }
