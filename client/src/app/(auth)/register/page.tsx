@@ -45,7 +45,7 @@ export default function RegisterPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({
+          body: JSON.stringify({ 
             login: data.login,
             password: data.password,
             password_confirmation: data.confirmPassword,
