@@ -202,6 +202,7 @@ export class ApiClient {
       return new Promise<T>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", this.baseUrl + endpoint, true);
+        xhr.withCredentials = true;
 
         // Устанавливаем заголовки, если они есть
         const headers = new Headers(options.headers);
