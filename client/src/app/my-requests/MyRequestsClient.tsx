@@ -117,6 +117,12 @@ export default function MyRequestsClient() {
               </div>
               <div className="col-span-12 md:col-span-4 text-sm font-medium text-discord-text truncate" title={req.end_client?.name ?? 'Не указан'}>
                 {req.end_client?.name ?? 'Не указан'}
+                {req.manager_comment && (
+                  <div className="mt-1 flex items-start gap-2 text-xs text-discord-text-secondary">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mt-0.5" viewBox="0 0 24 24" fill="currentColor"><path d="M4.5 6.75A2.25 2.25 0 016.75 4.5h10.5A2.25 2.25 0 0119.5 6.75v7.5A2.25 2.25 0 0117.25 16.5H9l-3.53 2.353A.75.75 0 013.75 18.25V6.75z"/></svg>
+                    <span className="truncate" title={req.manager_comment}>{req.manager_comment}</span>
+                  </div>
+                )}
               </div>
               <div className="col-span-12 md:col-span-3 text-sm text-discord-text-secondary truncate" title={req.items && req.items.length > 0 ? (req.items[0].product?.name ?? req.items[0].custom_item_name ?? 'Кастомный') : 'Нет данных'}>
                 {(req.items && req.items.length > 0 ? (req.items[0].product?.name ?? req.items[0].custom_item_name) : 'Нет данных')}

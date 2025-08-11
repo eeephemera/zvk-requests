@@ -144,3 +144,14 @@ export async function downloadAllFiles(requestId: number): Promise<void> {
     }
   }
 } 
+
+export async function getQuickFilesAction(requestId: number): Promise<
+  | { type: 'single'; file: { id: number; file_name: string } }
+  | { type: 'multiple'; files: Array<{ id: number; file_name: string }> }
+> {
+  const files = await getRequestFiles(requestId);
+  if (files.length <= 1) {
+    return { type: 'single', file: files[0] ?? { id: 0, file_name: 'file' } };
+  }
+  return { type: 'multiple', files: files.map(f => ({ id: f.id, file_name: f.file_name })) };
+} 

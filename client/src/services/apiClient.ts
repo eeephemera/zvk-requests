@@ -239,7 +239,7 @@ export class ApiClient {
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
               if (ct.includes('application/json')) {
-                resolve(JSON.parse(xhr.responseText));
+            resolve(JSON.parse(xhr.responseText));
               } else {
                 // не JSON — пробуем отдать как есть
                 resolve(JSON.parse('{}'));

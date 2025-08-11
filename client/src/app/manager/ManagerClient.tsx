@@ -5,8 +5,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   getAllRequests, 
   updateRequestStatus,
-  getRequestFiles,
-  downloadAllFiles
+  downloadAllFiles,
+  getQuickFilesAction
 } from "@/services/managerRequestService";
 import { Request } from "@/services/requestService";
 import { ApiError, PaginatedResponse, fetchBlobWithFilename } from '@/services/apiClient';
@@ -118,24 +118,52 @@ export default function ManagerClient() {
      router.push(`/manager/requests/${id}`);
   };
 
+  // Files menu state
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  const [filesCache, setFilesCache] = useState<Record<number, { loading: boolean; files?: Array<{ id: number; file_name: string; mime_type: string; file_size: number }>; error?: string }>>({});
+
+  const toggleFilesMenu = async (requestId: number) => {
+    if (openMenuId === requestId) {
+      setOpenMenuId(null);
+      return;
+    }
+    // Load files and decide behavior
+    setFilesCache(prev => ({ ...prev, [requestId]: prev[requestId] || { loading: true } }));
+    try {
+      const action = await getQuickFilesAction(requestId);
+      if (action.type === 'single') {
+        // direct download
+        if (action.file.id) {
+          await handleDownloadFile(action.file.id, action.file.file_name);
+        }
+        // keep menu closed
+        setOpenMenuId(null);
+        setFilesCache(prev => ({ ...prev, [requestId]: { loading: false, files: action.file.id ? [{ id: action.file.id, file_name: action.file.file_name, mime_type: '', file_size: 0 }] : [] } }));
+      } else {
+        // open menu and show list
+        setOpenMenuId(requestId);
+        setFilesCache(prev => ({ ...prev, [requestId]: { loading: false, files: action.files.map(f => ({ id: f.id, file_name: f.file_name, mime_type: '', file_size: 0 })) } }));
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Ошибка загрузки файлов';
+      setFilesCache(prev => ({ ...prev, [requestId]: { loading: false, error: message } }));
+    }
+  };
+
   const handleDownloadAll = async (requestId: number) => {
     await downloadAllFiles(requestId);
   };
 
-  const handleDownloadFirst = async (requestId: number) => {
-    const files = await getRequestFiles(requestId);
-    if (files.length > 0) {
-      const f = files[0];
-      const { blob, filename } = await fetchBlobWithFilename(`/api/manager/requests/files/${f.id}`);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename || f.file_name || `file-${f.id}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    }
+  const handleDownloadFile = async (fileId: number, fallbackName?: string) => {
+    const { blob, filename } = await fetchBlobWithFilename(`/api/manager/requests/files/${fileId}`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || fallbackName || `file-${fileId}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   useEffect(() => {
@@ -233,17 +261,53 @@ export default function ManagerClient() {
               {formatDate(req.created_at)}
             </div>
             {/* Quick file actions */}
-            <div className="col-span-full md:col-span-1 flex items-center gap-2 justify-start md:justify-center">
+            <div className="col-span-full md:col-span-1 relative">
               <button
-                onClick={(e) => { e.stopPropagation(); handleDownloadFirst(req.id); }}
-                className="text-xs px-2 py-1 border rounded hover:bg-discord-border"
-                title="Скачать первый файл"
-              >1</button>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDownloadAll(req.id); }}
-                className="text-xs px-2 py-1 border rounded hover:bg-discord-border"
-                title="Скачать все файлы"
-              >Все</button>
+                onClick={(e) => { e.stopPropagation(); toggleFilesMenu(req.id); }}
+                className="flex items-center gap-1 text-xs px-2 py-1 border rounded hover:bg-discord-border"
+                title="Вложения"
+              >
+                {/* Paperclip icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 6.75v8.25a4.5 4.5 0 11-9 0V5.25a2.25 2.25 0 114.5 0v8.25a.75.75 0 11-1.5 0V5.25a.75.75 0 00-1.5 0v9.75a3 3 0 106 0V6.75a.75.75 0 111.5 0z"/></svg>
+                <span className="hidden md:inline">Файлы</span>
+              </button>
+              {openMenuId === req.id && (
+                <div className="absolute right-0 mt-2 w-64 z-10 bg-discord-card border border-discord-border rounded shadow-lg p-2">
+                  {filesCache[req.id]?.loading && (
+                    <div className="p-3 text-sm text-discord-text-muted">Загрузка...</div>
+                  )}
+                  {filesCache[req.id]?.error && (
+                    <div className="p-3 text-sm text-discord-danger">{filesCache[req.id]?.error}</div>
+                  )}
+                  {filesCache[req.id]?.files && filesCache[req.id]!.files!.length > 0 ? (
+                    <div className="space-y-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDownloadAll(req.id); }}
+                        className="w-full flex items-center gap-2 text-left text-xs px-2 py-1 rounded hover:bg-discord-input"
+                      >
+                        {/* Download icon */}
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.75a.75.75 0 01.75.75v8.19l2.47-2.47a.75.75 0 111.06 1.06l-3.75 3.75a.75.75 0 01-1.06 0L7.72 11.28a.75.75 0 111.06-1.06l2.47 2.47V4.5a.75.75 0 01.75-.75z"/><path d="M4.5 15.75a.75.75 0 01.75.75v1.5A1.5 1.5 0 006.75 19.5h10.5a1.5 1.5 0 001.5-1.5v-1.5a.75.75 0 011.5 0v1.5A3 3 0 0117.25 21H6.75A3 3 0 013.75 18v-1.5a.75.75 0 01.75-.75z"/></svg>
+                        Скачать все
+                      </button>
+                      <div className="max-h-56 overflow-auto divide-y divide-discord-border/50">
+                        {filesCache[req.id]!.files!.map((f) => (
+                          <button
+                            key={f.id}
+                            onClick={(e) => { e.stopPropagation(); handleDownloadFile(f.id, f.file_name); }}
+                            className="w-full text-left text-xs px-2 py-2 hover:bg-discord-input flex items-center gap-2"
+                            title={f.file_name}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-discord-text-muted" viewBox="0 0 24 24" fill="currentColor"><path d="M8 3.75A2.25 2.25 0 015.75 6v12A2.25 2.25 0 008 20.25h8A2.25 2.25 0 0018.25 18V8.56a2.25 2.25 0 00-.66-1.59l-2.56-2.56a2.25 2.25 0 00-1.59-.66H8z"/></svg>
+                            <span className="truncate">{f.file_name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (!filesCache[req.id]?.loading && !filesCache[req.id]?.error) ? (
+                    <div className="p-3 text-sm text-discord-text-muted">Файлы отсутствуют</div>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
         ))}

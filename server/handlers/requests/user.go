@@ -13,6 +13,7 @@ import (
 	"github.com/eeephemera/zvk-requests/server/handlers" // Предполагаем, что хелперы тут
 	"github.com/eeephemera/zvk-requests/server/middleware"
 	"github.com/eeephemera/zvk-requests/server/models"
+	"github.com/eeephemera/zvk-requests/server/utils"
 	"github.com/gorilla/mux"
 	"github.com/shopspring/decimal"
 )
@@ -49,8 +50,8 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 	}
 
 	// 3. Парсим multipart form
-	// Увеличиваем лимит, если файлы могут быть большими (например, 32MB)
-	err = r.ParseMultipartForm(32 << 20)
+	// Лимит тела и multipart: 15MB (соответствует UI)
+	err = r.ParseMultipartForm(15 << 20)
 	log.Printf("Результат ParseMultipartForm (nil - это хорошо): %v", err) // Логируем ошибку парсинга
 	if err != nil {
 		handlers.RespondWithError(w, http.StatusBadRequest, "Failed to parse multipart form: "+err.Error())
@@ -154,34 +155,39 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 	if len(uploadedFiles) > 0 {
 		log.Printf("Получено %d файлов для загрузки", len(uploadedFiles))
 		for _, fileHeader := range uploadedFiles {
+			// Лимит 15MB на файл
+			if fileHeader.Size > 15*1024*1024 {
+				handlers.RespondWithError(w, http.StatusRequestEntityTooLarge, "File exceeds 15MB limit")
+				return
+			}
 			file, err := fileHeader.Open()
 			if err != nil {
 				log.Printf("CreateRequestHandlerNew: Error opening uploaded file %s: %v", fileHeader.Filename, err)
 				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to process uploaded file")
 				return
 			}
-		defer file.Close()
+			defer file.Close()
 
-		fileBytes, err := io.ReadAll(file)
-		if err != nil {
+			fileBytes, err := io.ReadAll(file)
+			if err != nil {
 				log.Printf("CreateRequestHandlerNew: Error reading uploaded file %s: %v", fileHeader.Filename, err)
-			handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to read uploaded file")
-			return
-		}
+				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to read uploaded file")
+				return
+			}
 
-		newFile := &models.File{
-				FileName: fileHeader.Filename,
+			newFile := &models.File{
+				FileName: utils.SanitizeFilename(fileHeader.Filename),
 				MimeType: fileHeader.Header.Get("Content-Type"),
 				FileSize: fileHeader.Size,
-			FileData: fileBytes,
-		}
+				FileData: fileBytes,
+			}
 
-		fileID, err := h.Repo.CreateFile(r.Context(), newFile)
-		if err != nil {
+			fileID, err := h.Repo.CreateFile(r.Context(), newFile)
+			if err != nil {
 				log.Printf("CreateRequestHandlerNew: Error saving file %s to DB: %v", fileHeader.Filename, err)
-			handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to save file to database")
-			return
-		}
+				handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to save file to database")
+				return
+			}
 			fileIDs = append(fileIDs, fileID)
 		}
 	}

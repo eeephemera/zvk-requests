@@ -7,18 +7,18 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/eeephemera/zvk-requests/server/db"
 	"github.com/eeephemera/zvk-requests/server/handlers"
 	"github.com/eeephemera/zvk-requests/server/middleware"
-	"github.com/eeephemera/zvk-requests/server/models"
+	"github.com/eeephemera/zvk-requests/server/utils"
 	"github.com/gorilla/mux"
 )
 
 // DownloadFileHandler обрабатывает запрос на скачивание файла.
-// Проверяет, имеет ли пользователь (любой авторизованный) доступ к файлу,
-// но не проверяет, привязан ли этот файл к конкретной заявке пользователя.
-// Для более строгой проверки можно добавить логику проверки доступа к заявке.
+// Выполняет строгую проверку доступа для всех ролей и поддерживает Range/ETag.
 func (h *RequestHandler) DownloadFileHandler(w http.ResponseWriter, r *http.Request) {
 	// 1. Получаем ID пользователя и его роль из контекста
 	userID, ok := r.Context().Value(middleware.UserIDKey).(int)
@@ -26,7 +26,6 @@ func (h *RequestHandler) DownloadFileHandler(w http.ResponseWriter, r *http.Requ
 		handlers.RespondWithError(w, http.StatusUnauthorized, "User not authenticated")
 		return
 	}
-	userRole, _ := r.Context().Value(middleware.RoleKey).(models.UserRole)
 
 	// 2. Получаем ID файла из URL
 	vars := mux.Vars(r)
@@ -41,20 +40,8 @@ func (h *RequestHandler) DownloadFileHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// 3. Проверка прав доступа
-	var hasAccess bool
-	var errAccess error
-
-	if userRole == models.RoleManager {
-		// Менеджеру можно скачивать любой файл, но в идеале нужно проверять доступ к заявке
-		// Для простоты пока дадим доступ ко всем файлам.
-		// В проде можно добавить h.Repo.CheckManagerAccessToFile(r.Context(), userID, fileID)
-		hasAccess = true
-	} else {
-		// Обычный пользователь должен быть автором заявки
-		hasAccess, errAccess = h.Repo.CheckUserAccessToFile(r.Context(), userID, fileID)
-	}
-
+	// 3. Строгая проверка прав доступа (включая менеджеров)
+	hasAccess, errAccess := h.Repo.CheckUserAccessToFile(r.Context(), userID, fileID)
 	if errAccess != nil {
 		log.Printf("DownloadFileHandler: Error checking access for user %d, file %d: %v", userID, fileID, errAccess)
 		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to check file access rights")
@@ -81,7 +68,7 @@ func (h *RequestHandler) DownloadFileHandler(w http.ResponseWriter, r *http.Requ
 	fileData, err := h.Repo.GetFileDataByID(r.Context(), fileID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			handlers.RespondWithError(w, http.StatusNotFound, "File data not found") // Маловероятно, если инфо есть
+			handlers.RespondWithError(w, http.StatusNotFound, "File data not found")
 			return
 		}
 		log.Printf("DownloadFileHandler: Error getting file data for ID %d: %v", fileID, err)
@@ -89,17 +76,91 @@ func (h *RequestHandler) DownloadFileHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// 6. Отправляем файл пользователю
-	// Устанавливаем заголовки для скачивания с корректной обработкой не-ASCII символов
-	w.Header().Set("Content-Type", fileInfo.MimeType)
-	// Формируем заголовок Content-Disposition, который понимают современные браузеры
-	// filename* - это стандарт RFC 5987 для кодирования не-ASCII символов
-	disposition := fmt.Sprintf("attachment; filename*=UTF-8''%s", url.QueryEscape(fileInfo.FileName))
-	w.Header().Set("Content-Disposition", disposition)
-	w.Header().Set("Content-Length", strconv.FormatInt(fileInfo.FileSize, 10))
+	// 6. Заголовки кеширования/валидации
+	etag := fmt.Sprintf("\"file-%d-%d-%d\"", fileInfo.ID, fileInfo.FileSize, fileInfo.CreatedAt.Unix())
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("Accept-Ranges", "bytes")
+	lastModified := fileInfo.CreatedAt.UTC().Format(http.TimeFormat)
+	w.Header().Set("Last-Modified", lastModified)
 
-	// Отправляем содержимое
-	w.Write(fileData)
+	if inm := r.Header.Get("If-None-Match"); inm != "" && strings.Contains(inm, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	if ims := r.Header.Get("If-Modified-Since"); ims != "" {
+		if t, err := time.Parse(http.TimeFormat, ims); err == nil {
+			if !fileInfo.CreatedAt.After(t) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	}
+
+	// 7. Контент и имя файла (санитизированное)
+	cleanName := utils.SanitizeFilename(fileInfo.FileName)
+	w.Header().Set("Content-Type", fileInfo.MimeType)
+	disposition := fmt.Sprintf("attachment; filename*=UTF-8''%s", url.QueryEscape(cleanName))
+	w.Header().Set("Content-Disposition", disposition)
+
+	// 8. Поддержка Range-запросов
+	rangeHeader := r.Header.Get("Range")
+	total := int64(len(fileData))
+	if rangeHeader == "" {
+		w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
+		w.WriteHeader(http.StatusOK)
+		w.Write(fileData)
+		return
+	}
+
+	// Пример Range: bytes=start-end
+	if !strings.HasPrefix(rangeHeader, "bytes=") {
+		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	parts := strings.Split(strings.TrimPrefix(rangeHeader, "bytes="), ",")
+	// Поддерживаем только один диапазон
+	rangeSpec := strings.TrimSpace(parts[0])
+	se := strings.Split(rangeSpec, "-")
+	if len(se) != 2 {
+		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	var start, end int64
+	var perr error
+	if se[0] == "" { // suffix bytes: -N
+		// последние N байт
+		n, perr := strconv.ParseInt(se[1], 10, 64)
+		if perr != nil || n <= 0 {
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		if n > total {
+			n = total
+		}
+		start = total - n
+		end = total - 1
+	} else {
+		start, perr = strconv.ParseInt(se[0], 10, 64)
+		if perr != nil || start < 0 || start >= total {
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		if se[1] == "" {
+			end = total - 1
+		} else {
+			end, perr = strconv.ParseInt(se[1], 10, 64)
+			if perr != nil || end < start || end >= total {
+				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+				return
+			}
+		}
+	}
+	length := end - start + 1
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	w.WriteHeader(http.StatusPartialContent)
+	w.Write(fileData[start : end+1])
 }
 
 // ListRequestFilesForManager возвращает список файлов заявки для менеджера
