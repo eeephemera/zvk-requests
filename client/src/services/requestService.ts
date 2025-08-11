@@ -150,40 +150,8 @@ export async function getUserRequests(
 }
 
 export async function downloadFileById(fileID: number): Promise<FileDownloadResponse> {
-  const response = await fetch(`/api/requests/files/${fileID}`, {
-    credentials: 'include'
-  });
-
-  if (!response.ok) {
-    let errorMessage = 'Failed to download file';
-    try {
-        const errorData = await response.json();
-        errorMessage = errorData.message || errorMessage;
-    } catch {
-        // Игнорируем ошибку парсинга тела, используем стандартное сообщение
-    }
-    throw new Error(`HTTP error! status: ${response.status}, message: ${errorMessage}`);
-  }
-
-  const contentDisposition = response.headers.get('content-disposition');
-  let filename = 'download'; // Имя по умолчанию
-
-  if (contentDisposition) {
-    // Сначала ищем современный формат RFC 5987 (filename*=UTF-8''...)
-    const rfc5987match = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);
-    if (rfc5987match && rfc5987match[1]) {
-      filename = decodeURIComponent(rfc5987match[1]);
-    } else {
-      // Если не нашли, ищем старый формат (filename="...")
-      const plainMatch = /filename="?([^"]+)"?/.exec(contentDisposition);
-      if (plainMatch && plainMatch[1]) {
-        filename = plainMatch[1]; // Этот вариант может неверно обрабатывать кириллицу в некоторых браузерах
-      }
-    }
-  }
-
-  const blob = await response.blob();
-  return { blob, filename };
+  const { fetchBlobWithFilename } = await import('./apiClient');
+  return fetchBlobWithFilename(`/api/requests/files/${fileID}`);
 }
 
 export async function submitDealRegistration(data: DealRegistrationData): Promise<Request> {

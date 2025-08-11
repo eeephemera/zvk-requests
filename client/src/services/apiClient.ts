@@ -58,7 +58,7 @@ export async function fetchBlobWithFilename(endpoint: string): Promise<BlobRespo
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, { headers });
+  const response = await fetch(`${BASE_URL}${endpoint}`, { headers, credentials: 'include' });
 
   if (!response.ok) {
     throw new ApiError('Failed to download file', response.status);
