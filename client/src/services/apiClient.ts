@@ -64,9 +64,24 @@ export async function fetchBlobWithFilename(endpoint: string): Promise<BlobRespo
     throw new ApiError('Failed to download file', response.status);
   }
 
-  const contentDisposition = response.headers.get('content-disposition');
-  const filenameMatch = contentDisposition?.match(/filename="?(.+?)"?$/);
-  const filename = filenameMatch ? filenameMatch[1] : 'download';
+  const contentDisposition = response.headers.get('content-disposition') || '';
+  let filename = 'download';
+
+  // 1) RFC 5987: filename*=UTF-8''...
+  const rfc5987 = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);
+  if (rfc5987 && rfc5987[1]) {
+    try {
+      filename = decodeURIComponent(rfc5987[1]);
+    } catch {
+      filename = rfc5987[1];
+    }
+  } else {
+    // 2) Legacy: filename="..."
+    const legacy = /filename="?([^";]+)"?/i.exec(contentDisposition);
+    if (legacy && legacy[1]) {
+      filename = legacy[1];
+    }
+  }
 
   const blob = await response.blob();
   return { blob, filename };

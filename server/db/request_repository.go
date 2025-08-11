@@ -334,7 +334,8 @@ func (r *RequestRepository) ListRequestsByUser(ctx context.Context, userID int, 
 			p.name as partner_name,
 			ec.id as client_id,
 			ec.name as client_name,
-			r.end_client_details_override
+			r.end_client_details_override,
+			r.manager_comment
 		FROM requests r
 		LEFT JOIN partners p ON r.partner_id = p.id
 		LEFT JOIN end_clients ec ON r.end_client_id = ec.id
@@ -357,6 +358,7 @@ func (r *RequestRepository) ListRequestsByUser(ctx context.Context, userID int, 
 		var client models.EndClient
 		var clientID sql.NullInt64
 		var clientName, endClientDetailsOverride sql.NullString
+		var managerComment sql.NullString
 
 		err := rows.Scan(
 			&req.ID,
@@ -368,6 +370,7 @@ func (r *RequestRepository) ListRequestsByUser(ctx context.Context, userID int, 
 			&clientID,
 			&clientName,
 			&endClientDetailsOverride,
+			&managerComment,
 		)
 		if err != nil {
 			// Логируем ошибку, но не прерываем весь процесс
@@ -388,6 +391,9 @@ func (r *RequestRepository) ListRequestsByUser(ctx context.Context, userID int, 
 		// Устанавливаем оверрайд, если он есть
 		if endClientDetailsOverride.Valid {
 			req.EndClientDetailsOverride = &endClientDetailsOverride.String
+		}
+		if managerComment.Valid {
+			req.ManagerComment = &managerComment.String
 		}
 
 		requests = append(requests, req)
@@ -491,7 +497,6 @@ func pstr(s string) *string {
 	return &s
 }
 
-
 // ListAllRequests возвращает список всех заявок с пагинацией, фильтрацией и сортировкой.
 // Предназначен для роли Менеджера.
 func (repo *RequestRepository) ListAllRequests(
@@ -559,7 +564,8 @@ func (repo *RequestRepository) ListAllRequests(
 			p.id as partner_id, p.name as partner_name,
 			u.id as user_id, u.name as user_name,
 			ec.id as client_id, ec.name as client_name,
-			r.end_client_details_override
+			r.end_client_details_override,
+			r.manager_comment
 	` + baseQuery + whereQuery
 
 	// Сортировка
@@ -603,6 +609,7 @@ func (repo *RequestRepository) ListAllRequests(
 		var client models.EndClient
 		var clientName, endClientDetailsOverride sql.NullString
 		var clientID sql.NullInt64
+		var managerComment sql.NullString
 
 		err := rows.Scan(
 			&req.ID, &req.CreatedAt, &req.Status, &req.ProjectName,
@@ -610,6 +617,7 @@ func (repo *RequestRepository) ListAllRequests(
 			&user.ID, &user.Name,
 			&clientID, &clientName,
 			&endClientDetailsOverride,
+			&managerComment,
 		)
 		if err != nil {
 			log.Printf("Error scanning request row: %v", err)
@@ -628,6 +636,9 @@ func (repo *RequestRepository) ListAllRequests(
 		}
 		if endClientDetailsOverride.Valid {
 			req.EndClientDetailsOverride = &endClientDetailsOverride.String
+		}
+		if managerComment.Valid {
+			req.ManagerComment = &managerComment.String
 		}
 
 		requests = append(requests, req)
@@ -723,7 +734,8 @@ func (repo *RequestRepository) ListRequestsForManager(
 			p.id as partner_id, p.name as partner_name,
 			u.id as user_id, u.name as user_name,
 			ec.id as client_id, ec.name as client_name,
-			r.end_client_details_override
+			r.end_client_details_override,
+			r.manager_comment
 	` + baseQuery + whereQuery
 
 	if sortBy != "" {
@@ -762,6 +774,7 @@ func (repo *RequestRepository) ListRequestsForManager(
 		var client models.EndClient
 		var clientName, endClientDetailsOverride sql.NullString
 		var clientID sql.NullInt64
+		var managerComment sql.NullString
 
 		err := rows.Scan(
 			&req.ID, &req.CreatedAt, &req.Status, &req.ProjectName,
@@ -769,6 +782,7 @@ func (repo *RequestRepository) ListRequestsForManager(
 			&user.ID, &user.Name,
 			&clientID, &clientName,
 			&endClientDetailsOverride,
+			&managerComment,
 		)
 		if err != nil {
 			log.Printf("Error scanning request row for manager %d: %v", managerID, err)
@@ -787,6 +801,9 @@ func (repo *RequestRepository) ListRequestsForManager(
 		}
 		if endClientDetailsOverride.Valid {
 			req.EndClientDetailsOverride = &endClientDetailsOverride.String
+		}
+		if managerComment.Valid {
+			req.ManagerComment = &managerComment.String
 		}
 
 		requests = append(requests, req)

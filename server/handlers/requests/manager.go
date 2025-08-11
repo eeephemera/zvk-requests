@@ -78,9 +78,15 @@ func (h *RequestHandler) UpdateRequestStatusHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// 7. Отправляем успешный ответ (можно вернуть обновленную заявку, если нужно)
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Request status updated successfully"})
+	// 7. Возвращаем обновленную заявку, чтобы фронт сразу получил manager_comment и статус
+	updatedReq, err := h.Repo.GetRequestDetailsByID(r.Context(), requestID)
+	if err != nil {
+		log.Printf("UpdateRequestStatusHandler: updated fetch failed for request %d: %v", requestID, err)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Request status updated successfully"})
+		return
+	}
+	handlers.RespondWithJSON(w, http.StatusOK, updatedReq)
 }
 
 // ListManagerRequestsHandler - получение списка заявок для менеджера (пагинация, фильтры, сортировка)
