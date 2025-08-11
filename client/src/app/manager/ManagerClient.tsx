@@ -5,7 +5,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   getAllRequests, 
   updateRequestStatus,
-  deleteRequest,
   getRequestFiles,
   downloadAllFiles
 } from "@/services/managerRequestService";
@@ -94,13 +93,6 @@ export default function ManagerClient() {
     }
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => deleteRequest(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['managerRequests'] });
-    }
-  });
-
   const handleOpenModal = (request: Request) => {
     setSelectedRequest(request);
     setIsModalOpen(true);
@@ -109,12 +101,6 @@ export default function ManagerClient() {
   const handleStatusUpdate = (newStatus: string, comment: string) => {
     if (selectedRequest) {
       statusMutation.mutate({ id: selectedRequest.id, status: newStatus, comment });
-    }
-  };
-
-  const handleDeleteRequest = (id: number) => {
-    if (window.confirm("Вы уверены, что хотите удалить эту заявку? Это действие необратимо.")) {
-      deleteMutation.mutate(id);
     }
   };
 
