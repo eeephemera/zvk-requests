@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -79,6 +80,14 @@ func (rl *RateLimiter) addRequest(key string, requests map[string][]time.Time) {
 	requests[key] = append(requests[key], now)
 }
 
+// respondTooManyRequests отвечает в JSON формате с кодом 429.
+func (rl *RateLimiter) respondTooManyRequests(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprintf("%.0f", rl.windowSize.Seconds()))
+	w.WriteHeader(http.StatusTooManyRequests)
+	_, _ = w.Write([]byte(`{"error":"Rate limit exceeded"}`))
+}
+
 // LimitByIP создает middleware для ограничения по IP адресу.
 func (rl *RateLimiter) LimitByIP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +105,7 @@ func (rl *RateLimiter) LimitByIP(next http.Handler) http.Handler {
 
 		// Проверяем лимит
 		if rl.isLimited(ip, rl.ipRequests) {
-			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			rl.respondTooManyRequests(w)
 			return
 		}
 
@@ -152,7 +161,7 @@ func (rl *RateLimiter) LimitByPath(paths []string, stricterLimit int) func(http.
 
 			requests := rl.pathRequests
 			if len(requests[key]) >= currentLimit {
-				http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+				rl.respondTooManyRequests(w)
 				return
 			}
 

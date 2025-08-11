@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/eeephemera/zvk-requests/server/db"
@@ -77,8 +79,42 @@ func main() {
 		w.Write([]byte("OK"))
 	}).Methods("GET", "OPTIONS")
 
-	// Инициализируем RateLimiter
-	rateLimiter := middleware.NewRateLimiter(1*time.Minute, 100) // 100 запросов в минуту
+	// Инициализируем RateLimiter (читаем значения из ENV)
+	window := 1 * time.Minute
+	if v := os.Getenv("RATE_LIMIT_WINDOW_SECONDS"); v != "" {
+		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+			window = time.Duration(sec) * time.Second
+		}
+	}
+	maxReq := 300 // дефолт чуть выше, чтобы не мешал ручным тестам
+	if v := os.Getenv("RATE_LIMIT_MAX_REQUESTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxReq = n
+		}
+	}
+	rateLimiter := middleware.NewRateLimiter(window, maxReq)
+
+	// Базовый rate limiter для всех запросов (кроме некоторых GET/OPTIONS)
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			// Освобождаем "легкие" методы/эндпойнты от общего лимитера
+			if (req.Method == http.MethodGet || req.Method == http.MethodOptions) &&
+				(req.URL.Path == "/api/me" || strings.HasPrefix(req.URL.Path, "/api/end-clients/search")) {
+				next.ServeHTTP(w, req)
+				return
+			}
+			rateLimiter.LimitByIP(next).ServeHTTP(w, req)
+		})
+	})
+
+	// Специальный rate limiter для авторизации (более строгий: по умолчанию 20/мин)
+	loginMax := 20
+	if v := os.Getenv("RATE_LIMIT_LOGIN_PER_MIN"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			loginMax = n
+		}
+	}
+	loginLimiter := middleware.NewRateLimiter(1*time.Minute, loginMax)
 
 	// CORS middleware (УДАЛЕНО, теперь обрабатывается Nginx)
 	// r.Use(func(next http.Handler) http.Handler {
@@ -114,18 +150,12 @@ func main() {
 	// 	})
 	// })
 
-	// Базовый rate limiter для всех запросов
-	r.Use(rateLimiter.LimitByIP)
-
-	// Специальный rate limiter для авторизации (более строгий: 10 запросов в минуту)
-	loginLimiter := middleware.NewRateLimiter(1*time.Minute, 10)
-
 	// Публичные маршруты
 	r.HandleFunc("/api/register", authHandler.RegisterUser).Methods("POST")
 
 	// Применяем более строгий rate limiter к маршруту login
 	loginRouter := r.PathPrefix("/api/login").Subrouter()
-	loginRouter.Use(loginLimiter.LimitByPath([]string{"/api/login"}, 10))
+	loginRouter.Use(loginLimiter.LimitByPath([]string{"/api/login"}, loginMax))
 	loginRouter.HandleFunc("", authHandler.LoginUser).Methods("POST")
 
 	r.HandleFunc("/api/logout", handlers.LogoutUser).Methods("POST")

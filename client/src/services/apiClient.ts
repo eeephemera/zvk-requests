@@ -23,6 +23,15 @@ export interface BlobResponse {
   filename: string;
 }
 
+function extractMessage(data: unknown, fallback: string): string {
+  if (data && typeof data === 'object') {
+    const rec = data as Record<string, unknown>;
+    if (typeof rec.error === 'string') return rec.error;
+    if (typeof rec.message === 'string') return rec.message;
+  }
+  return fallback;
+}
+
 // Base API client configuration
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8081';
 const REQUEST_TIMEOUT = 30000; // 30 seconds
@@ -85,14 +94,21 @@ export async function apiFetch<T>(
     const contentType = response.headers.get('content-type');
 
     if (!response.ok) {
-      const errorData = contentType?.includes('application/json') 
-        ? await response.json()
-        : { error: 'Ошибка сервера' };
-      
+      let errorData: unknown = null;
+      let rawText = '';
+      try {
+        if (contentType?.includes('application/json')) {
+          errorData = await response.json();
+        } else {
+          rawText = await response.text();
+        }
+      } catch {}
+
+      const message = extractMessage(errorData, rawText || 'Ошибка сервера');
       throw new ApiError(
-        errorData.error || 'Ошибка сервера',
+        message,
         response.status,
-        errorData
+        errorData ?? { raw: rawText }
       );
     }
 
@@ -141,11 +157,18 @@ export class ApiClient {
       });
       
       if (!response.ok) {
-        const error = await response.json().catch(() => null);
+        let parsed: unknown = null;
+        let raw = '';
+        const ct = response.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          parsed = await response.json().catch(() => null);
+        } else {
+          raw = await response.text().catch(() => '');
+        }
         throw new ApiError(
-          error?.message || `HTTP error! status: ${response.status}`,
+          extractMessage(parsed, raw || `HTTP error! status: ${response.status}`),
           response.status,
-          error
+          parsed ?? { raw }
         );
       }
       
@@ -196,15 +219,29 @@ export class ApiClient {
 
         // Обработка завершения запроса
         xhr.onload = () => {
+          const ct = xhr.getResponseHeader('content-type') || '';
           if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(JSON.parse(xhr.responseText));
+            try {
+              if (ct.includes('application/json')) {
+                resolve(JSON.parse(xhr.responseText));
+              } else {
+                // не JSON — пробуем отдать как есть
+                resolve(JSON.parse('{}'));
+              }
+            } catch {
+              resolve(JSON.parse('{}'));
+            }
           } else {
-            const error = JSON.parse(xhr.responseText);
-            reject(new ApiError(
-              error?.message || `HTTP error! status: ${xhr.status}`,
-              xhr.status,
-              error
-            ));
+            let message = `HTTP error! status: ${xhr.status}`;
+            try {
+              if (ct.includes('application/json')) {
+                const err = JSON.parse(xhr.responseText);
+                message = err?.message || err?.error || message;
+                reject(new ApiError(message, xhr.status, err));
+                return;
+              }
+            } catch {}
+            reject(new ApiError(message, xhr.status, { raw: xhr.responseText }));
           }
         };
 
