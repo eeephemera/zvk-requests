@@ -446,9 +446,24 @@ func (repo *RequestRepository) CheckUserAccessToFile(ctx context.Context, userID
 		return false, fmt.Errorf("could not verify user role")
 	}
 
-	// Менеджеры имеют доступ ко всему
 	if userRole == models.RoleManager {
-		return true, nil
+		// Строгая проверка: менеджер должен быть назначен партнеру, к заявке которого привязан файл
+		query := `
+			SELECT EXISTS (
+				SELECT 1
+				FROM request_files rf
+				JOIN requests r ON rf.request_id = r.id
+				JOIN partners p ON r.partner_id = p.id
+				WHERE rf.file_id = $1 AND p.assigned_manager_id = $2
+			)
+		`
+		var hasAccess bool
+		err := repo.pool.QueryRow(ctx, query, fileID, userID).Scan(&hasAccess)
+		if err != nil {
+			log.Printf("Error checking manager file access for user %d and file %d: %v", userID, fileID, err)
+			return false, fmt.Errorf("failed to check file access")
+		}
+		return hasAccess, nil
 	}
 
 	// Для обычных пользователей проверяем, что они создали заявку, к которой прикреплен файл
@@ -468,6 +483,11 @@ func (repo *RequestRepository) CheckUserAccessToFile(ctx context.Context, userID
 	}
 
 	return hasAccess, nil
+}
+
+// ListFilesForRequest возвращает метаданные файлов заявки без бинарных данных
+func (repo *RequestRepository) ListFilesForRequest(ctx context.Context, requestID int) ([]*models.File, error) {
+	return repo.getFilesForRequest(ctx, requestID)
 }
 
 // DeleteRequest удаляет заявку по ID.

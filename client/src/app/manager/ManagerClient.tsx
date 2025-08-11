@@ -5,10 +5,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   getAllRequests, 
   updateRequestStatus,
-  deleteRequest
+  deleteRequest,
+  getRequestFiles,
+  downloadAllFiles
 } from "@/services/managerRequestService";
 import { Request } from "@/services/requestService";
-import { ApiError, PaginatedResponse } from '@/services/apiClient';
+import { ApiError, PaginatedResponse, fetchBlobWithFilename } from '@/services/apiClient';
 import ProtectedRoute from "@/components/ProtectedRoute";
 import StatusUpdateModal from "@/components/StatusUpdateModal";
 import { formatDate } from "@/utils/formatters";
@@ -130,6 +132,26 @@ export default function ManagerClient() {
      router.push(`/manager/requests/${id}`);
   };
 
+  const handleDownloadAll = async (requestId: number) => {
+    await downloadAllFiles(requestId);
+  };
+
+  const handleDownloadFirst = async (requestId: number) => {
+    const files = await getRequestFiles(requestId);
+    if (files.length > 0) {
+      const f = files[0];
+      const { blob, filename } = await fetchBlobWithFilename(`/api/manager/requests/files/${f.id}`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename || f.file_name || `file-${f.id}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+  };
+
   useEffect(() => {
     if (isModalOpen) {
       document.body.style.overflow = 'hidden';
@@ -186,7 +208,7 @@ export default function ManagerClient() {
           <div className="col-span-3">Конечный клиент</div>
           <div className="col-span-2">Статус</div>
           <div className="col-span-2 text-right">Создана</div>
-          <div className="col-span-1"></div>
+          <div className="col-span-1">Файлы</div>
         </div>
 
         {requests.map((req) => (
@@ -208,28 +230,34 @@ export default function ManagerClient() {
             <div className="col-span-full md:col-span-3 text-sm text-discord-text-secondary truncate" title={req.end_client?.name ?? 'Н/Д'}>
                {req.end_client?.name ?? 'Н/Д'}
             </div>
-             {/* Status */}
-            <div className="col-span-full md:col-span-2 text-xs">
+             {/* Status + comment indicator */}
+            <div className="col-span-full md:col-span-2 text-xs flex items-center gap-2">
                  <button
                     onClick={(e) => { e.stopPropagation(); handleOpenModal(req); }}
-                    className={`border text-xs rounded-full px-3 py-1.5 w-full text-left transition-colors duration-200 ${getStatusClasses(req.status)} hover:opacity-80`}
+                    className={`border text-xs rounded-full px-3 py-1.5 transition-colors duration-200 ${getStatusClasses(req.status)} hover:opacity-80`}
                   >
                     {req.status}
                  </button>
+                 {req.manager_comment && (
+                   <span title="Есть комментарий" className="inline-block w-2.5 h-2.5 rounded-full bg-discord-accent" />
+                 )}
             </div>
              {/* Created At */}
             <div className="col-span-full md:col-span-2 text-sm text-discord-text-muted md:text-right">
               {formatDate(req.created_at)}
             </div>
-            {/* Actions */}
-            <div className="col-span-full md:col-span-1 flex items-center justify-end space-x-2">
-                <button
-                    onClick={(e) => { e.stopPropagation(); handleDeleteRequest(req.id); }}
-                    className="text-discord-text-muted hover:text-discord-danger transition-colors p-1 rounded-full hover:bg-discord-danger/10"
-                    aria-label={`Удалить заявку #${req.id}`}
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                </button>
+            {/* Quick file actions */}
+            <div className="col-span-full md:col-span-1 flex items-center gap-2 justify-start md:justify-center">
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDownloadFirst(req.id); }}
+                className="text-xs px-2 py-1 border rounded hover:bg-discord-border"
+                title="Скачать первый файл"
+              >1</button>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDownloadAll(req.id); }}
+                className="text-xs px-2 py-1 border rounded hover:bg-discord-border"
+                title="Скачать все файлы"
+              >Все</button>
             </div>
           </div>
         ))}

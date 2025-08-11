@@ -187,6 +187,8 @@ func main() {
 	managerRouter.HandleFunc("/{id:[0-9]+}/status", requestHandler.UpdateRequestStatusHandler).Methods("PUT")
 	// Маршрут скачивания файлов менеджером по fileID
 	managerRouter.HandleFunc("/files/{fileID:[0-9]+}", requestHandler.DownloadFileHandler).Methods("GET")
+	// Список файлов заявки для менеджера
+	managerRouter.HandleFunc("/{id:[0-9]+}/files", requestHandler.ListRequestFilesForManager).Methods("GET")
 	// Затем общие
 	managerRouter.HandleFunc("", requestHandler.ListManagerRequestsHandler).Methods("GET")
 	managerRouter.HandleFunc("/{id:[0-9]+}", requestHandler.GetManagerRequestDetailsHandler).Methods("GET")

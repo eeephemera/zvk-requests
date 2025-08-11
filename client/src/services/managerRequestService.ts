@@ -120,3 +120,27 @@ export async function downloadRequestFile(requestId: number, fileType: string = 
        throw err;
    }
 } 
+
+export async function getRequestFiles(requestId: number) : Promise<Array<{ id: number; file_name: string; mime_type: string; file_size: number }>> {
+  if (!requestId) throw new ApiError("Не указан ID заявки для списка файлов.", 400);
+  return apiFetch(`/api/manager/requests/${requestId}/files`);
+}
+
+export async function downloadAllFiles(requestId: number): Promise<void> {
+  const files = await getRequestFiles(requestId);
+  for (const f of files) {
+    try {
+      const { blob, filename } = await fetchBlobWithFilename(`/api/manager/requests/files/${f.id}`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename || f.file_name || `file-${f.id}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(`Failed to download file ${f.id}`, e);
+    }
+  }
+} 

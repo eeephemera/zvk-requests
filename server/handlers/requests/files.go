@@ -101,3 +101,37 @@ func (h *RequestHandler) DownloadFileHandler(w http.ResponseWriter, r *http.Requ
 	// Отправляем содержимое
 	w.Write(fileData)
 }
+
+// ListRequestFilesForManager возвращает список файлов заявки для менеджера
+func (h *RequestHandler) ListRequestFilesForManager(w http.ResponseWriter, r *http.Request) {
+	managerID, ok := r.Context().Value(middleware.UserIDKey).(int)
+	if !ok {
+		handlers.RespondWithError(w, http.StatusUnauthorized, "Manager not authenticated")
+		return
+	}
+	vars := mux.Vars(r)
+	requestIDStr := vars["id"]
+	requestID, err := strconv.Atoi(requestIDStr)
+	if err != nil || requestID <= 0 {
+		handlers.RespondWithError(w, http.StatusBadRequest, "Invalid request ID format")
+		return
+	}
+	// Проверка доступа менеджера к заявке
+	hasAccess, err := h.Repo.CheckManagerAccess(r.Context(), managerID, requestID)
+	if err != nil {
+		log.Printf("ListRequestFilesForManager: Error checking manager access for manager %d, request %d: %v", managerID, requestID, err)
+		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to check access rights")
+		return
+	}
+	if !hasAccess {
+		handlers.RespondWithError(w, http.StatusForbidden, "Manager does not have permission to view files for this request")
+		return
+	}
+	files, err := h.Repo.ListFilesForRequest(r.Context(), requestID)
+	if err != nil {
+		log.Printf("ListRequestFilesForManager: Error listing files for request %d: %v", requestID, err)
+		handlers.RespondWithError(w, http.StatusInternalServerError, "Failed to list files")
+		return
+	}
+	handlers.RespondWithJSON(w, http.StatusOK, files)
+}
