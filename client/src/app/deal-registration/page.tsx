@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import ProtectedRoute from '@/components/ProtectedRoute';
-import Header from '@/components/Header';
 import Link from 'next/link';
 
 import { findEndClientByINN, EndClient } from '@/services/endClientService';
@@ -274,7 +273,6 @@ export default function DealRegistrationPage() {
     return (
       <ProtectedRoute allowedRoles={["USER"]} redirectIfNotAllowed={true}>
         <div className="min-h-screen flex flex-col bg-discord-background">
-          <Header />
           <div className="flex-grow flex items-center justify-center">
             <LoadingSpinner />
             <p className="text-discord-text-muted ml-3">Загрузка данных...</p>
@@ -288,7 +286,6 @@ export default function DealRegistrationPage() {
     return (
       <ProtectedRoute allowedRoles={["USER"]} redirectIfNotAllowed={true}>
         <div className="min-h-screen flex flex-col bg-discord-background">
-          <Header />
           <div className="container mx-auto p-6">
              <div className="discord-card max-w-4xl mx-auto p-6 bg-discord-danger/10 border border-discord-danger/30">
                  <h2 className="text-xl font-bold text-discord-danger mb-3">Ошибка загрузки данных</h2>
@@ -308,7 +305,6 @@ export default function DealRegistrationPage() {
   return (
     <ProtectedRoute allowedRoles={["USER"]} redirectIfNotAllowed={true}>
       <div className="min-h-screen flex flex-col bg-discord-background">
-        <Header />
         <div className="container mx-auto p-6 flex-grow">
           <div className="bg-discord-card border border-discord-border rounded-lg w-full max-w-4xl p-6 mx-auto">
             <div className="flex justify-between items-center mb-6">
@@ -411,7 +407,7 @@ export default function DealRegistrationPage() {
                     {formErrors.projectName && <p className="form-error-message">{formErrors.projectName.message}</p>}
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     {/* Левая колонка описания */}
                     <div className="space-y-5">
                       {/* ПОЛЯ ДЛЯ ТОВАРА УДАЛЕНЫ */}
@@ -525,7 +521,7 @@ export default function DealRegistrationPage() {
                 {/* --- 3. Информация о конечном клиенте --- */}
                 <div className="border border-discord-border p-4 rounded-lg bg-discord-background relative">
                   <h3 className="text-lg font-semibold text-discord-text mb-3">Конечный клиент</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     {/* ИНН */}
                     <div className="relative">
                       <label htmlFor="endClientInn" className="form-label">ИНН конечного клиента *</label>

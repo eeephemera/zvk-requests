@@ -1,0 +1,28 @@
+# Enforce LF line endings in repo regardless of OS
+* text=auto eol=lf
+
+# Treat these as text explicitly (LF)
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.css text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sql text eol=lf
+
+# Binary files
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.ico -text
+*.svg -text
+*.pdf -text
+*.zip -text
+*.gz -text
+*.exe -text
+
