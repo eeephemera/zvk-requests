@@ -106,10 +106,6 @@ export default function ManagerClient() {
     }
   };
 
-  const handleFilter = () => {
-    updateUrl(1, filterStatus, filterOrg);
-  };
-  
   const handleResetFilters = () => {
     setFilterStatus('');
     setFilterOrg('');
@@ -157,30 +153,6 @@ export default function ManagerClient() {
       <div className="col-span-full md:col-span-1 h-6 bg-discord-border/50 rounded" />
     </div>
   );
-
-  const SortHeader = ({ column, label, align = 'left' }: { column: SortField; label: string; align?: 'left' | 'right' }) => {
-    const isActive = sortBy === column;
-    const ariaSort = isActive ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none';
-    const arrow = !isActive ? (
-      <span className="opacity-40">↕</span>
-    ) : sortOrder === 'asc' ? (
-      <span>▲</span>
-    ) : (
-      <span>▼</span>
-    );
-    return (
-      <button
-        onClick={() => toggleSort(column)}
-        className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : 'justify-start'} hover:text-discord-accent transition-colors`}
-        title={`Сортировать по ${label.toLowerCase()}`}
-        role="columnheader"
-        aria-sort={ariaSort as 'none' | 'ascending' | 'descending'}
-      >
-        <span>{label}</span>
-        <span className="text-xs">{arrow}</span>
-      </button>
-    );
-  };
 
   const renderContent = () => {
     if (isLoading && !requestsData) {
@@ -282,7 +254,7 @@ export default function ManagerClient() {
         isLoading={isLoading && !requestsData}
         sortBy={sortBy}
         sortOrder={sortOrder}
-        onSortChange={(id) => toggleSort(id as any)}
+        onSortChange={(id) => toggleSort(id as SortField)}
         getRowKey={(r) => r.id}
         tableLabel="Заявки менеджера"
       />

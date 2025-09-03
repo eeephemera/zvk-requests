@@ -108,9 +108,7 @@ export default function MyRequestsClient() {
     }
   };
   
-  const handleRowClick = (requestId: number) => {
-    router.push(`/my-requests/${requestId}`);
-  };
+  // Row click handled inline when needed
 
   const renderContent = () => {
     if (isLoading) {
@@ -149,9 +147,6 @@ export default function MyRequestsClient() {
 
     const columns: Array<Column<Request>> = [
       { id: 'id', header: 'ID', sortable: true, className: 'col-span-12 md:col-span-1', accessor: (r) => (
-        <span className="md:hidden font-bold text-discord-text-muted">ID: </span>
-      ) },
-      { id: 'id-value', header: '', className: 'hidden md:block md:col-span-0', accessor: (r) => (
         <span>#{r.id}</span>
       ) },
       { id: 'end_client_name', header: 'Конечный клиент', sortable: true, className: 'col-span-12 md:col-span-4', accessor: (r) => (
@@ -209,7 +204,7 @@ export default function MyRequestsClient() {
           isLoading={isLoading}
           sortBy={sortBy}
           sortOrder={sortOrder}
-          onSortChange={(id) => toggleSort(id as any)}
+          onSortChange={(id) => toggleSort(id as 'id' | 'end_client_name' | 'status' | 'created_at')}
           getRowKey={(r) => r.id}
           tableLabel="Мои регистрации"
         />
