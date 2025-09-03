@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import Providers from "@/components/Providers";
+import Header from "@/components/Header";
 
 export const metadata: Metadata = {
   title: "ЗВК-Заявки",
@@ -19,6 +20,7 @@ export default function RootLayout({
         <Providers>
           <AuthProvider>
             <div className="flex flex-col min-h-screen">
+              <Header />
               <main className="flex-grow relative">{children}</main>
             </div>
           </AuthProvider>

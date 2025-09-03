@@ -25,8 +25,8 @@ export async function getAllRequests(
   });
   if (statusFilter) params.append('status', statusFilter);
   if (orgFilter) params.append('organization_name', orgFilter); 
-  if (sortBy) params.append('sort_by', sortBy);
-  if (sortOrder) params.append('sort_order', sortOrder);
+  if (sortBy) params.append('sortBy', sortBy);
+  if (sortOrder) params.append('sortOrder', sortOrder);
 
   const endpoint = `/api/manager/requests?${params.toString()}`;
   console.log(`Fetching all requests from (manager): ${endpoint}`);

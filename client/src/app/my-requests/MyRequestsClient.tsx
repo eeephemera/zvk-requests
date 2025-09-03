@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -10,6 +10,9 @@ import { ApiError, PaginatedResponse } from "@/services/apiClient";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { formatDate } from "@/utils/formatters";
 import { getStatusColor } from "@/utils/statusUtils";
+import DataTable from "@/components/table/DataTable";
+import type { Column } from "@/components/table/types";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 // Константа для количества элементов на странице
 const ITEMS_PER_PAGE = 10;
@@ -34,6 +37,58 @@ export default function MyRequestsClient() {
   // Мемоизированные значения для предотвращения лишних ререндеров
   const totalRequests = useMemo(() => requestsData?.total ?? 0, [requestsData]);
   const requests = useMemo(() => requestsData?.items ?? [], [requestsData]);
+
+  // Client-side filters & sorting
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [searchOrg, setSearchOrg] = useState<string>("");
+  const debouncedOrg = useDebouncedValue(searchOrg, 400);
+  const [sortBy, setSortBy] = useState<'id' | 'end_client_name' | 'status' | 'created_at'>("created_at");
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>("desc");
+
+  const filtered = useMemo(() => {
+    return requests.filter((r) => {
+      const statusOk = statusFilter ? r.status === statusFilter : true;
+      const orgName = r.end_client?.name?.toLowerCase() || "";
+      const orgOk = debouncedOrg ? orgName.includes(debouncedOrg.toLowerCase()) : true;
+      return statusOk && orgOk;
+    });
+  }, [requests, statusFilter, debouncedOrg]);
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    arr.sort((a, b) => {
+      const av = (() => {
+        switch (sortBy) {
+          case 'id': return a.id;
+          case 'end_client_name': return (a.end_client?.name || "").toLowerCase();
+          case 'status': return a.status;
+          case 'created_at': return a.created_at;
+        }
+      })();
+      const bv = (() => {
+        switch (sortBy) {
+          case 'id': return b.id;
+          case 'end_client_name': return (b.end_client?.name || "").toLowerCase();
+          case 'status': return b.status;
+          case 'created_at': return b.created_at;
+        }
+      })();
+      if (sortBy === 'id') return (av as number) > (bv as number) ? dir : (av as number) < (bv as number) ? -dir : 0;
+      if (sortBy === 'created_at') return new Date(av as string).getTime() > new Date(bv as string).getTime() ? dir : new Date(av as string).getTime() < new Date(bv as string).getTime() ? -dir : 0;
+      return ('' + av).localeCompare('' + bv) * dir;
+    });
+    return arr;
+  }, [filtered, sortBy, sortOrder]);
+
+  const toggleSort = (column: 'id' | 'end_client_name' | 'status' | 'created_at') => {
+    if (sortBy === column) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(column);
+      setSortOrder('asc');
+    }
+  };
   
   const requestError = useMemo(() => {
     if (!isError || !error) return null;
@@ -92,73 +147,78 @@ export default function MyRequestsClient() {
       );
     }
 
+    const columns: Array<Column<Request>> = [
+      { id: 'id', header: 'ID', sortable: true, className: 'col-span-12 md:col-span-1', accessor: (r) => (
+        <span className="md:hidden font-bold text-discord-text-muted">ID: </span>
+      ) },
+      { id: 'id-value', header: '', className: 'hidden md:block md:col-span-0', accessor: (r) => (
+        <span>#{r.id}</span>
+      ) },
+      { id: 'end_client_name', header: 'Конечный клиент', sortable: true, className: 'col-span-12 md:col-span-4', accessor: (r) => (
+        <div title={r.end_client?.name ?? 'Не указан'} className="truncate">
+          {r.end_client?.name ?? 'Не указан'}
+          {r.manager_comment && (
+            <div className="mt-1 flex items-start gap-2 text-xs text-discord-text-secondary">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mt-0.5" viewBox="0 0 24 24" fill="currentColor"><path d="M4.5 6.75A2.25 2.25 0 016.75 4.5h10.5A2.25 2.25 0 0119.5 6.75v7.5A2.25 2.25 0 0117.25 16.5H9l-3.53 2.353A.75.75 0 013.75 18.25V6.75z"/></svg>
+              <span className="truncate" title={r.manager_comment}>{r.manager_comment}</span>
+            </div>
+          )}
+        </div>
+      ) },
+      { id: 'product', header: 'Продукт/Услуга', className: 'col-span-12 md:col-span-3', accessor: (r) => (
+        <span className="truncate block text-discord-text-secondary" title={r.items && r.items.length > 0 ? (r.items[0].product?.name ?? r.items[0].custom_item_name ?? 'Кастомный') : 'Нет данных'}>
+          {(r.items && r.items.length > 0 ? (r.items[0].product?.name ?? r.items[0].custom_item_name) : 'Нет данных')}
+          {r.items && r.items.length > 1 && <span className="text-xs"> (и еще {r.items.length - 1})</span>}
+        </span>
+      ) },
+      { id: 'status', header: 'Статус', sortable: true, className: 'col-span-12 md:col-span-2', accessor: (r) => (
+        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(r.status)}`}>
+          {r.status}
+        </div>
+      ) },
+      { id: 'created_at', header: 'Создана', sortable: true, className: 'col-span-12 md:col-span-2 md:text-right', accessor: (r) => (
+        <span>{formatDate(r.created_at)}</span>
+      ) },
+    ];
+
     return (
       <>
-        <div className="hidden md:grid grid-cols-12 gap-4 px-4 py-2 text-xs font-bold text-discord-text-muted uppercase">
-          <div className="col-span-1">ID</div>
-          <div className="col-span-4">Конечный клиент</div>
-          <div className="col-span-3">Продукт/Услуга</div>
-          <div className="col-span-2">Статус</div>
-          <div className="col-span-2 text-right">Создана</div>
+        {/* Filters */}
+        <div className="mb-4 flex flex-wrap gap-3 items-end">
+          <div className="flex flex-col gap-2">
+            <label className="text-xs text-discord-text-muted">Статус</label>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="discord-input">
+              <option value="">Все статусы</option>
+              <option value="На рассмотрении">На рассмотрении</option>
+              <option value="В работе">В работе</option>
+              <option value="На уточнении">На уточнении</option>
+              <option value="Одобрена">Одобрена</option>
+              <option value="Отклонена">Отклонена</option>
+              <option value="Завершена">Завершена</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-xs text-discord-text-muted">Организация</label>
+            <input type="text" value={searchOrg} onChange={(e) => setSearchOrg(e.target.value)} placeholder="Поиск по организации..." className="discord-input" />
+          </div>
         </div>
 
-        <div className="space-y-2">
-          {requests.map((req: Request) => (
-            <div
-              key={req.id}
-              className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center p-4 rounded-lg bg-discord-card hover:bg-discord-input transition-colors duration-200 cursor-pointer"
-              onClick={() => handleRowClick(req.id)}
-              role="link"
-              tabIndex={0}
-              onKeyDown={(e) => e.key === 'Enter' && handleRowClick(req.id)}
-            >
-              <div className="col-span-12 md:col-span-1 text-sm text-discord-text">
-                <span className="md:hidden font-bold text-discord-text-muted">ID: </span>#{req.id}
-              </div>
-              <div className="col-span-12 md:col-span-4 text-sm font-medium text-discord-text truncate" title={req.end_client?.name ?? 'Не указан'}>
-                {req.end_client?.name ?? 'Не указан'}
-                {req.manager_comment && (
-                  <div className="mt-1 flex items-start gap-2 text-xs text-discord-text-secondary">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mt-0.5" viewBox="0 0 24 24" fill="currentColor"><path d="M4.5 6.75A2.25 2.25 0 016.75 4.5h10.5A2.25 2.25 0 0119.5 6.75v7.5A2.25 2.25 0 0117.25 16.5H9l-3.53 2.353A.75.75 0 013.75 18.25V6.75z"/></svg>
-                    <span className="truncate" title={req.manager_comment}>{req.manager_comment}</span>
-                  </div>
-                )}
-              </div>
-              <div className="col-span-12 md:col-span-3 text-sm text-discord-text-secondary truncate" title={req.items && req.items.length > 0 ? (req.items[0].product?.name ?? req.items[0].custom_item_name ?? 'Кастомный') : 'Нет данных'}>
-                {(req.items && req.items.length > 0 ? (req.items[0].product?.name ?? req.items[0].custom_item_name) : 'Нет данных')}
-                {req.items && req.items.length > 1 && <span className="text-xs"> (и еще {req.items.length - 1})</span>}
-              </div>
-              <div className="col-span-12 md:col-span-2 text-xs">
-                <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(req.status)}`}>
-                  {req.status}
-                </div>
-              </div>
-              <div className="col-span-12 md:col-span-2 text-sm text-discord-text-secondary md:text-right">
-                {formatDate(req.created_at)}
-              </div>
-            </div>
-          ))}
-        </div>
+        <DataTable
+          columns={columns}
+          data={sorted}
+          isLoading={isLoading}
+          sortBy={sortBy}
+          sortOrder={sortOrder}
+          onSortChange={(id) => toggleSort(id as any)}
+          getRowKey={(r) => r.id}
+          tableLabel="Мои регистрации"
+        />
 
         {totalPages > 1 && (
           <div className="flex justify-between items-center mt-6">
-            <button
-              onClick={() => goToPage(currentPage - 1)}
-              disabled={currentPage === 1}
-              className="discord-btn-secondary transition-colors duration-200"
-            >
-              &laquo; Назад
-            </button>
-            <span className="text-discord-text-muted text-sm">
-              Страница {currentPage} из {totalPages}
-            </span>
-            <button
-              onClick={() => goToPage(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="discord-btn-secondary transition-colors duration-200"
-            >
-              Вперед &raquo;
-            </button>
+            <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="discord-btn-secondary transition-colors duration-200">&laquo; Назад</button>
+            <span className="text-discord-text-muted text-sm">Страница {currentPage} из {totalPages}</span>
+            <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="discord-btn-secondary transition-colors duration-200">Вперед &raquo;</button>
           </div>
         )}
       </>
