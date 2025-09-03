@@ -95,6 +95,23 @@ func (repo *UserRepository) GetUserByLogin(ctx context.Context, login string) (*
 	return &user, nil
 }
 
+// UpdatePasswordHash обновляет хеш пароля для пользователя.
+func (repo *UserRepository) UpdatePasswordHash(ctx context.Context, userID int, newHash string) error {
+	query := `
+        UPDATE users
+        SET password_hash = $1
+        WHERE id = $2
+    `
+	ct, err := repo.pool.Exec(ctx, query, newHash, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update password hash: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // TODO: Добавить методы ListUsers, UpdateUser, DeleteUser по необходимости.
 // TODO: Возможно, добавить метод для получения пользователя вместе с деталями партнера (JOIN).
 // func (repo *UserRepository) GetUserWithPartnerDetails(ctx context.Context, id int) (*models.User, error) { ... }

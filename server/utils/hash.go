@@ -14,7 +14,7 @@ func HashPassword(password string) (string, error) {
 		return "", fmt.Errorf("invalid password: %w", err)
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return "", fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -26,6 +26,16 @@ func CheckPasswordHash(password, hash string) error {
 		return fmt.Errorf("password verification failed: %w", err)
 	}
 	return nil
+}
+
+// NeedsRehash возвращает true, если текущий bcrypt-хеш имеет стоимость ниже рекомендуемой
+// и его следует пересчитать при следующем входе пользователя.
+func NeedsRehash(hash string) bool {
+	cost, err := bcrypt.Cost([]byte(hash))
+	if err != nil {
+		return true
+	}
+	return cost < bcrypt.DefaultCost
 }
 
 func ValidatePassword(password string) error {

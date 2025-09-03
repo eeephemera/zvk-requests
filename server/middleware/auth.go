@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/eeephemera/zvk-requests/server/models"
@@ -25,6 +26,12 @@ const (
 // Глобальная переменная для хранения секрета
 var jwtSecret []byte
 
+// В памяти: черный список JTI (до указанного срока)
+var (
+	revokedJTIs   = make(map[string]time.Time)
+	revokedJTIsMu sync.Mutex
+)
+
 // Установить секретный ключ (вызывается из main.go)
 func SetJWTSecret(secret string) {
 	if secret == "" {
@@ -36,6 +43,29 @@ func SetJWTSecret(secret string) {
 // Получить текущий секрет
 func GetJWTSecret() []byte {
 	return jwtSecret
+}
+
+// BlacklistJTI помечает jti отозванным до момента expiresAt.
+func BlacklistJTI(jti string, expiresAt time.Time) {
+	revokedJTIsMu.Lock()
+	defer revokedJTIsMu.Unlock()
+	revokedJTIs[jti] = expiresAt
+}
+
+// IsJTIRevoked проверяет, отозван ли jti (и чистит просроченные записи).
+func IsJTIRevoked(jti string) bool {
+	revokedJTIsMu.Lock()
+	defer revokedJTIsMu.Unlock()
+	// Очистка просроченных
+	now := time.Now()
+	for k, v := range revokedJTIs {
+		if now.After(v) {
+			delete(revokedJTIs, k)
+		}
+	}
+
+	exp, ok := revokedJTIs[jti]
+	return ok && now.Before(exp)
 }
 
 // ValidateToken — middleware для проверки JWT, извлекаемого из куки
@@ -96,14 +126,19 @@ func ValidateToken(next http.Handler) http.Handler {
 			return
 		}
 
-		// Проверка, что токен не использовался раньше установленного времени (iat, если есть)
+		// Проверка, что токен не из будущего
 		if iat, ok := claims["iat"].(float64); ok {
 			issuedAt := time.Unix(int64(iat), 0)
-			// Проверка, что токен не из будущего (с погрешностью на разницу в часах серверов)
 			if issuedAt.After(time.Now().Add(5 * time.Minute)) {
 				http.Error(w, "Token issued in the future", http.StatusUnauthorized)
 				return
 			}
+		}
+
+		// Проверка jti на отзыв
+		if jti, ok := claims["jti"].(string); ok && IsJTIRevoked(jti) {
+			http.Error(w, "Token revoked", http.StatusUnauthorized)
+			return
 		}
 
 		// Извлечение ID пользователя
@@ -113,20 +148,16 @@ func ValidateToken(next http.Handler) http.Handler {
 			return
 		}
 
-		// Извлечение роли
-		roleValue, ok := claims["role"].(string)
-		if !ok {
-			http.Error(w, "Invalid user role format in token", http.StatusUnauthorized)
-			return
+		// Извлечение роли (допускаем строковое значение)
+		roleValue, _ := claims["role"].(string)
+		if roleValue != "" {
+			if roleValue != string(models.RoleUser) && roleValue != string(models.RoleManager) {
+				http.Error(w, "Invalid user role value in token", http.StatusUnauthorized)
+				return
+			}
 		}
 
-		// Проверка, что роль имеет допустимое значение
-		if roleValue != string(models.RoleUser) && roleValue != string(models.RoleManager) {
-			http.Error(w, "Invalid user role value in token", http.StatusUnauthorized)
-			return
-		}
-
-		// Извлечение JWT ID (jti) для возможного будущего blacklisting
+		// Извлечение JWT ID (jti)
 		var tokenID string
 		if jti, ok := claims["jti"].(string); ok {
 			tokenID = jti
@@ -134,9 +165,9 @@ func ValidateToken(next http.Handler) http.Handler {
 
 		// Создаем контекст с данными из токена
 		ctx := context.WithValue(r.Context(), UserIDKey, int(userID))
-		ctx = context.WithValue(ctx, RoleKey, roleValue)
-
-		// Добавляем дополнительные данные в контекст, если они есть в токене
+		if roleValue != "" {
+			ctx = context.WithValue(ctx, RoleKey, roleValue)
+		}
 		if tokenID != "" {
 			ctx = context.WithValue(ctx, TokenIDKey, tokenID)
 		}

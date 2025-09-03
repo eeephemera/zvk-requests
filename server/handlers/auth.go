@@ -41,8 +41,8 @@ func setTokenCookie(w http.ResponseWriter, tokenString string) {
 	// Задаем время жизни токена из переменной окружения или используем значение по умолчанию
 	expirationStr := os.Getenv("JWT_EXPIRATION")
 	expiration, err := time.ParseDuration(expirationStr)
-	if err != nil {
-		expiration = 72 * time.Hour // Значение по умолчанию
+	if err != nil || expiration <= 0 {
+		expiration = 60 * time.Minute // Значение по умолчанию: 60m
 	}
 
 	cookie := &http.Cookie{
@@ -53,6 +53,26 @@ func setTokenCookie(w http.ResponseWriter, tokenString string) {
 		Secure:   isProduction, // Secure=true только в продакшене (HTTPS)
 		Path:     "/",
 		// Для работы с кросс-доменным фронтендом (Vercel) требуется SameSite=None
+		SameSite: http.SameSiteNoneMode,
+	}
+	http.SetCookie(w, cookie)
+}
+
+// setRefreshCookie устанавливает refresh-токен в HttpOnly cookie с более длительным TTL.
+func setRefreshCookie(w http.ResponseWriter, tokenString string) {
+	isProduction := os.Getenv("APP_ENV") == "production"
+	refreshStr := os.Getenv("REFRESH_EXPIRATION")
+	refreshTTL, err := time.ParseDuration(refreshStr)
+	if err != nil || refreshTTL <= 0 {
+		refreshTTL = 30 * 24 * time.Hour // 30d по умолчанию
+	}
+	cookie := &http.Cookie{
+		Name:     "refresh_token",
+		Value:    tokenString,
+		Expires:  time.Now().Add(refreshTTL),
+		HttpOnly: true,
+		Secure:   isProduction,
+		Path:     "/",
 		SameSite: http.SameSiteNoneMode,
 	}
 	http.SetCookie(w, cookie)
@@ -186,98 +206,175 @@ func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем время жизни токена из переменной окружения
-	expirationStr := os.Getenv("JWT_EXPIRATION")
-	expiration, err := time.ParseDuration(expirationStr)
-	if err != nil {
-		expiration = 72 * time.Hour // Значение по умолчанию
+	// Ре-хеш, если нужно (миграция cost)
+	if utils.NeedsRehash(user.PasswordHash) {
+		if newHash, err := utils.HashPassword(req.Password); err == nil {
+			_ = h.UserRepo.UpdatePasswordHash(r.Context(), user.ID, newHash)
+		}
 	}
 
-	// Включаем "jti" (JWT ID) для предотвращения повторного использования токена
-	tokenID := utils.GenerateSecureRandomString(16)
+	// Время жизни access токена
+	expirationStr := os.Getenv("JWT_EXPIRATION")
+	expiration, err := time.ParseDuration(expirationStr)
+	if err != nil || expiration <= 0 {
+		expiration = 60 * time.Minute
+	}
+	// Время жизни refresh токена
+	refreshStr := os.Getenv("REFRESH_EXPIRATION")
+	refreshTTL, err := time.ParseDuration(refreshStr)
+	if err != nil || refreshTTL <= 0 {
+		refreshTTL = 30 * 24 * time.Hour
+	}
 
-	// Формируем claims с ролью типа UserRole и дополнительной информацией для безопасности
-	claims := jwt.MapClaims{
+	// JTI
+	accessJTI := utils.GenerateSecureRandomString(16)
+	refreshJTI := utils.GenerateSecureRandomString(24)
+
+	// Формируем access claims
+	accessClaims := jwt.MapClaims{
 		"id":    user.ID,
 		"login": user.Login,
-		"role":  user.Role, // Передаем UserRole напрямую (будет как строка в JWT)
-		"jti":   tokenID,   // Уникальный ID токена
+		"role":  user.Role,
+		"jti":   accessJTI,
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(expiration).Unix(),
 	}
-
-	// Генерация JWT
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(middleware.GetJWTSecret())
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessString, err := accessToken.SignedString(middleware.GetJWTSecret())
 	if err != nil {
 		log.Printf("JWT generation failed: %v", err)
 		RespondWithError(w, http.StatusInternalServerError, "Login failed")
 		return
 	}
 
-	// Устанавливаем куку с токеном
-	setTokenCookie(w, tokenString)
+	// Формируем refresh claims
+	refreshClaims := jwt.MapClaims{
+		"id":  user.ID,
+		"jti": refreshJTI,
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(refreshTTL).Unix(),
+		"typ": "refresh",
+	}
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshString, err := refreshToken.SignedString(middleware.GetJWTSecret())
+	if err != nil {
+		log.Printf("Refresh JWT generation failed: %v", err)
+		RespondWithError(w, http.StatusInternalServerError, "Login failed")
+		return
+	}
+
+	// Ставим куки
+	setTokenCookie(w, accessString)
+	setRefreshCookie(w, refreshString)
 
 	// Возвращаем данные пользователя в ответе
-	user.PasswordHash = "" // Убираем хеш перед отправкой
+	user.PasswordHash = ""
 	RespondWithJSON(w, http.StatusOK, LoginResponse{
 		Message: "Login successful",
 		User:    user,
 	})
 }
 
-// RefreshToken обновляет JWT токен.
+// RefreshToken обновляет JWT токены (access и refresh) с ротацией.
 func RefreshToken(w http.ResponseWriter, r *http.Request) {
-	// Извлекаем данные из контекста (заполняются в middleware.ValidateToken)
-	ctx := r.Context()
-	userID, ok := ctx.Value(middleware.UserIDKey).(int)
-	if !ok {
-		http.Error(w, "Invalid user ID", http.StatusUnauthorized)
+	// Берем refresh_token из cookies
+	refreshCookie, err := r.Cookie("refresh_token")
+	if err != nil || refreshCookie.Value == "" {
+		http.Error(w, "Missing refresh token", http.StatusUnauthorized)
 		return
 	}
 
-	roleValue := ctx.Value(middleware.RoleKey)
-	role, ok := roleValue.(models.UserRole) // Ожидаем UserRole
+	parser := jwt.NewParser(jwt.WithValidMethods([]string{"HS256"}))
+	token, err := parser.Parse(refreshCookie.Value, func(token *jwt.Token) (interface{}, error) {
+		return middleware.GetJWTSecret(), nil
+	})
+	if err != nil || !token.Valid {
+		http.Error(w, "Invalid refresh token", http.StatusUnauthorized)
+		return
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		// Попытка преобразовать строку, если в токене строка
-		roleStr, okStr := roleValue.(string)
-		if okStr {
-			role = models.UserRole(roleStr)
-		} else {
-			http.Error(w, "Invalid user role type in context", http.StatusUnauthorized)
+		http.Error(w, "Invalid refresh token claims", http.StatusUnauthorized)
+		return
+	}
+	if typ, _ := claims["typ"].(string); typ != "refresh" {
+		http.Error(w, "Wrong token type", http.StatusUnauthorized)
+		return
+	}
+	// Проверка истечения
+	if exp, ok := claims["exp"].(float64); ok {
+		if time.Now().After(time.Unix(int64(exp), 0)) {
+			http.Error(w, "Refresh token expired", http.StatusUnauthorized)
 			return
 		}
 	}
-
-	// Получаем время жизни токена из переменной окружения
-	expirationStr := os.Getenv("JWT_EXPIRATION")
-	expiration, err := time.ParseDuration(expirationStr)
-	if err != nil {
-		expiration = 72 * time.Hour // Значение по умолчанию
-	}
-
-	// Включаем "jti" (JWT ID) для предотвращения повторного использования токена
-	tokenID := utils.GenerateSecureRandomString(16)
-
-	// Генерация нового токена с полной информацией безопасности
-	claims := jwt.MapClaims{
-		"id":   userID,
-		"role": role,
-		"jti":  tokenID, // Уникальный ID токена
-		"iat":  time.Now().Unix(),
-		"exp":  time.Now().Add(expiration).Unix(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(middleware.GetJWTSecret())
-	if err != nil {
-		log.Printf("Token refresh failed: %v", err)
-		http.Error(w, "Token refresh failed", http.StatusInternalServerError)
+	// Проверка jti на отзыв
+	if oldJTI, ok := claims["jti"].(string); ok && middleware.IsJTIRevoked(oldJTI) {
+		http.Error(w, "Refresh token revoked", http.StatusUnauthorized)
 		return
 	}
 
-	// Обновляем куку с новым токеном
-	setTokenCookie(w, tokenString)
+	// Извлекаем user id
+	uidFloat, ok := claims["id"].(float64)
+	if !ok {
+		http.Error(w, "Invalid user in token", http.StatusUnauthorized)
+		return
+	}
+	userID := int(uidFloat)
+
+	// Время жизни
+	expirationStr := os.Getenv("JWT_EXPIRATION")
+	expiration, err := time.ParseDuration(expirationStr)
+	if err != nil || expiration <= 0 {
+		expiration = 60 * time.Minute
+	}
+	refreshStr := os.Getenv("REFRESH_EXPIRATION")
+	refreshTTL, err := time.ParseDuration(refreshStr)
+	if err != nil || refreshTTL <= 0 {
+		refreshTTL = 30 * 24 * time.Hour
+	}
+
+	// Ротация: отзываем старый refresh jti
+	if oldJTI, ok := claims["jti"].(string); ok {
+		// Отзываем до конца изначального TTL
+		if exp, ok := claims["exp"].(float64); ok {
+			middleware.BlacklistJTI(oldJTI, time.Unix(int64(exp), 0))
+		}
+	}
+
+	// Сгенерируем новые токены
+	newAccessJTI := utils.GenerateSecureRandomString(16)
+	newRefreshJTI := utils.GenerateSecureRandomString(24)
+
+	accessClaims := jwt.MapClaims{
+		"id":  userID,
+		"jti": newAccessJTI,
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(expiration).Unix(),
+	}
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessString, err := accessToken.SignedString(middleware.GetJWTSecret())
+	if err != nil {
+		http.Error(w, "Failed to issue access token", http.StatusInternalServerError)
+		return
+	}
+
+	refreshClaims := jwt.MapClaims{
+		"id":  userID,
+		"jti": newRefreshJTI,
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(refreshTTL).Unix(),
+		"typ": "refresh",
+	}
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshString, err := refreshToken.SignedString(middleware.GetJWTSecret())
+	if err != nil {
+		http.Error(w, "Failed to issue refresh token", http.StatusInternalServerError)
+		return
+	}
+
+	setTokenCookie(w, accessString)
+	setRefreshCookie(w, refreshString)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
@@ -320,17 +417,44 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 func LogoutUser(w http.ResponseWriter, r *http.Request) {
-	// Создаем cookie с истекшим сроком действия
+	// Попробуем отозвать текущие JTIs из access и refresh cookie
+	if c, err := r.Cookie("token"); err == nil {
+		if tok, err := jwt.Parse(c.Value, func(token *jwt.Token) (interface{}, error) { return middleware.GetJWTSecret(), nil }); err == nil && tok.Valid {
+			if cl, ok := tok.Claims.(jwt.MapClaims); ok {
+				if jti, ok := cl["jti"].(string); ok {
+					if exp, ok := cl["exp"].(float64); ok {
+						middleware.BlacklistJTI(jti, time.Unix(int64(exp), 0))
+					}
+				}
+			}
+		}
+	}
+	if c, err := r.Cookie("refresh_token"); err == nil {
+		if tok, err := jwt.Parse(c.Value, func(token *jwt.Token) (interface{}, error) { return middleware.GetJWTSecret(), nil }); err == nil && tok.Valid {
+			if cl, ok := tok.Claims.(jwt.MapClaims); ok {
+				if jti, ok := cl["jti"].(string); ok {
+					if exp, ok := cl["exp"].(float64); ok {
+						middleware.BlacklistJTI(jti, time.Unix(int64(exp), 0))
+					}
+				}
+			}
+		}
+	}
+
+	// Очищаем куки
 	cookie := &http.Cookie{
 		Name:     "token",
 		Value:    "",
-		Expires:  time.Unix(0, 0), // Время в прошлом
+		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
-		Secure:   os.Getenv("APP_ENV") == "production", // Secure для продакшена
+		Secure:   os.Getenv("APP_ENV") == "production",
 		Path:     "/",
 		SameSite: http.SameSiteNoneMode,
 	}
 	http.SetCookie(w, cookie)
+	refresh := *cookie
+	refresh.Name = "refresh_token"
+	http.SetCookie(w, &refresh)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
