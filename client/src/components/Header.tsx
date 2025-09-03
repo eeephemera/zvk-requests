@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link'; // Для логотипа/ссылки на главную
+import Image from 'next/image';
 
 export default function Header() {
   // Получаем состояние аутентификации и функцию logout из контекста
@@ -29,8 +30,20 @@ export default function Header() {
     <header className="bg-discord-card shadow-md w-full">
       <nav className="container mx-auto px-6 py-3 flex justify-between items-center">
         {/* Логотип или название */}
-        <Link href="/" className="text-xl font-bold text-discord-text hover:text-discord-accent transition-colors">
-          ЗВК-Заявки
+        <Link href="/" className="flex items-center gap-3 group">
+          <span className="inline-block">
+            <Image
+              src="https://i.postimg.cc/DfHTwsqH/photo-2025-02-27-10-55-06.jpg"
+              alt="ЗВК-Заявки"
+              width={36}
+              height={36}
+              className="rounded-md object-cover"
+              priority
+            />
+          </span>
+          <span className="text-xl font-bold text-discord-text group-hover:text-discord-accent transition-colors">
+            ЗВК-Заявки
+          </span>
         </Link>
 
         {/* Информация о пользователе и кнопка выхода */}
