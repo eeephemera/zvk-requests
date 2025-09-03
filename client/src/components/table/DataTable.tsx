@@ -102,12 +102,22 @@ export function DataTable<T>({
       {isLoading
         ? Array.from({ length: skeletonRows }).map((_, i) => <SkeletonRow key={i} />)
         : (
-          <div ref={containerRef} onScroll={onScroll} style={{ maxHeight: 640, overflowY: 'auto', position: 'relative' }}>
+          <div
+            ref={containerRef}
+            onScroll={onScroll}
+            style={{ maxHeight: 'calc(100vh - 260px)', overflowY: 'auto', position: 'relative' }}
+            className="scrollbar-thin"
+          >
             <div style={{ height: total * rowHeight, position: 'relative' }}>
               {data.slice(startIndex, endIndex).map((row, i) => {
                 const idx = startIndex + i;
                 return (
-                  <div key={getRowKey(row)} style={{ position: 'absolute', top: idx * rowHeight, left: 0, right: 0 }} className="grid grid-cols-1 md:grid-cols-12 gap-x-4 gap-y-2 items-center p-3 rounded-lg bg-discord-background hover:bg-discord-input transition-colors duration-200" role="row">
+                  <div
+                    key={getRowKey(row)}
+                    style={{ position: 'absolute', top: idx * rowHeight, left: 0, right: 0 }}
+                    className="grid grid-cols-1 md:grid-cols-12 gap-x-4 gap-y-2 items-center p-3 my-2 rounded-lg bg-discord-card border border-discord-border shadow-sm hover:bg-discord-input transition-colors duration-200"
+                    role="row"
+                  >
                     {columns.map((col) => hiddenCols[col.id] ? null : (
                       <div key={col.id} className={col.className} role="cell">
                         {col.cell ? col.cell(row) : col.accessor ? col.accessor(row) : null}
@@ -119,9 +129,8 @@ export function DataTable<T>({
             </div>
           </div>
         )}
-      {/* Column visibility toggles */}
-      {/** Simple toggler UI; can be hidden if not needed */}
-      <div className="flex flex-wrap gap-3 pt-2">
+      {/* Column visibility toggles (hidden on small screens to reduce clutter) */}
+      <div className="hidden md:flex flex-wrap gap-3 pt-2">
         {columns.map((c) => (
           <label key={c.id} className="text-xs text-discord-text-muted inline-flex items-center gap-2">
             <input type="checkbox" checked={!hiddenCols[c.id]} onChange={(e) => setHiddenCols((prev) => ({ ...prev, [c.id]: !e.target.checked }))} />

@@ -222,8 +222,8 @@ export default function MyRequestsClient() {
   
   return (
     <ProtectedRoute allowedRoles={["USER"]}>
-      <div className="container mx-auto p-4 sm:p-6">
-        <div className="bg-discord-card border border-discord-border rounded-lg w-full max-w-6xl p-6 mx-auto relative">
+      <div className="container mx-auto p-3 sm:p-4">
+        <div className="bg-discord-card border border-discord-border rounded-lg w-full max-w-6xl p-4 sm:p-6 mx-auto relative">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-2xl font-bold text-discord-text flex items-center">
               <span className="bg-discord-accent h-8 w-1 rounded-full mr-3"></span>
