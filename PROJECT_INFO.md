@@ -21,6 +21,13 @@
 
 Взаимодействие между фронтендом и бэкендом происходит через HTTP/HTTPS запросы к API бэкенда.
 
+Ключевые особенности бэкенда (актуально):
+- JWT в HttpOnly cookie с `SameSite=None` и `Secure=true` (в продакшене).
+- Ротация refresh‑токена и учет JTI: отозванные JTI сохраняются (персистентно через `RevocationStore` в БД, с in‑memory фолбэком).
+- CSRF защита double‑submit (cookie `csrf_token` + заголовок `X-CSRF-Token`), применяется к мутирующим запросам под `/api`.
+- Rate limiting по IP/маршруту, с временной блокировкой IP при превышении порога.
+- Структурированное логирование через `log/slog` (уровни, атрибуты — путь, метод, JTI и т.д.).
+
 ## 3. Стек технологий
 
 ### 3.1. Фронтенд (клиент)
@@ -38,11 +45,19 @@
 - **HTTP сервер**: Используется стандартная библиотека Go (`net/http`) и [Gorilla Mux](https://github.com/gorilla/mux) для маршрутизации.
 - **База данных**: [PostgreSQL](https://www.postgresql.org/).
 - **Аутентификация**:
-    - [JWT (JSON Web Tokens)](https://jwt.io/) для токенов сессии.
-    - Токены передаются через HttpOnly куки с атрибутом `SameSite=None` и `Secure=true` для кросс-доменного взаимодействия (Vercel/API-сервер).
+    - [JWT (JSON Web Tokens)](https://jwt.io/) (`github.com/golang-jwt/jwt/v5`).
+    - HttpOnly cookie с `SameSite=None`, `Secure=true` (в продакшене), `Refresh`‑ротация и blacklist JTI.
+    - Пароли: bcrypt, автоматический rehash при входе при изменении стоимости.
+- **Логирование**: `log/slog` (structured logging) для всех критичных путей аутентификации и инфраструктуры.
 - **Миграции базы данных**: Используется `github.com/golang-migrate/migrate/v4`.
 - **Конфигурация**: Переменные окружения загружаются из `.env` файлов с использованием `github.com/joho/godotenv`.
 - **CORS**: Обрабатывается на уровне Nginx и частично на бэкенде.
+
+Актуальные переменные окружения (основные):
+- `JWT_SECRET`, `JWT_EXPIRATION` (напр. `60m`), `REFRESH_EXPIRATION` (напр. `720h`)
+- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+- `APP_ENV` (`development`/`production`)
+- `RATE_LIMIT_WINDOW_SECONDS`, `RATE_LIMIT_MAX_REQUESTS`, `RATE_LIMIT_LOGIN_PER_MIN`
 
 ## 3.3. База данных
 - **Тип**: PostgreSQL 15+.
@@ -59,6 +74,7 @@
     - Nginx проксирует запросы на `/api/` к Go бэкенду.
     - Настроена поддержка SSL/HTTPS (используются сертификаты Let's Encrypt).
     - Nginx обрабатывает CORS `OPTIONS` запросы и добавляет необходимые `Access-Control-Allow-Origin`, `Access-Control-Allow-Credentials` заголовки для обычных запросов.
+    - Важно: `Set-Cookie` должен проходить к клиенту; для cross-site cookie используйте `SameSite=None; Secure`.
 
 ## 5. Процесс CI/CD (GitHub Actions)
 
@@ -87,11 +103,14 @@
     - `client/package.json`: Зависимости и скрипты фронтенда.
 - `server/`: Директория бэкенд-приложения (Go).
     - `server/main.go`: Основной файл Go-приложения, точки входа API.
-    - `server/handlers/auth.go`: Хендлеры аутентификации (регистрация, логин, логаут, `me`, `refresh`).
+    - `server/handlers/auth.go`: Хендлеры аутентификации (регистрация, логин, логаут, `me`, `refresh`) с выдачей/ротацией токенов и логированием через `slog`.
     - `server/Dockerfile`: Dockerfile для сборки образа Go бэкенда.
     - `server/.env`: Файл переменных окружения для бэкенда.
     - `server/db/migrations/`: Директория с SQL-миграциями базы данных.
     - `server/go.mod`, `server/go.sum`: Файлы Go модулей.
+    - `server/middleware/auth.go`: JWT‑валидация, извлечение контекста, проверка JTI (blacklist via RevocationStore).
+    - `server/middleware/rate_limiter.go`: Ограничение по IP и маршрутам + временная блокировка IP.
+    - `server/.gitignore`, `server/.dockerignore`: Исключают клиентские и бинарные артефакты из `server/`.
 - `nginx/`: Директория с конфигурацией Nginx.
     - `nginx/conf.d/default.conf`: Основной конфигурационный файл Nginx.
     - `nginx/ssl/`: Директория для SSL-сертификатов.
@@ -141,3 +160,11 @@
 11. **Некорректная работа кнопки "Зарегистрировать сделку" и выхода**:
     - **Причина**: Проблемы с валидацией/обработкой форм на фронтенде, а также неправильное удаление куки при выходе.
     - **Решение**: `SameSite=None` для куки выхода в Go бэкенде, удаление избыточных редиректов в `Header.tsx` (логика навигации делегирована `AuthContext`).
+12. **Ошибка компиляции: вызов `IsJTIRevoked` без контекста**:
+    - **Причина**: Сигнатура функции изменена на `IsJTIRevoked(ctx, jti)`.
+    - **Решение**: Передан `r.Context()` в местах вызова (`auth.go`, `middleware/auth.go`).
+13. **Отсутствие structured logging**:
+    - **Решение**: Внедрен `log/slog` в валидацию JWT, хендлеры аутентификации и `main.go`.
+14. **Недостаточная защита от брутфорса**:
+    - **Решение**: Улучшен rate limiter: добавлена временная блокировка IP при превышении лимитов (по IP и по маршруту `/api/login`).
+15. **Лишние фронтовые артефакты в `server/`**:

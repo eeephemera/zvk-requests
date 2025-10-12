@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -27,10 +28,22 @@ const (
 var jwtSecret []byte
 
 // В памяти: черный список JTI (до указанного срока)
+// Хранилище для отзывов JTI
+type RevocationStore interface {
+	IsRevoked(ctx context.Context, jti string) (bool, error)
+	Revoke(ctx context.Context, jti string, expiresAt time.Time) error
+}
+
 var (
-	revokedJTIs   = make(map[string]time.Time)
+	revokedJTIs   = make(map[string]time.Time) // fallback in-memory
 	revokedJTIsMu sync.Mutex
+	store         RevocationStore
 )
+
+// SetRevocationStore настраивает внешнее хранилище отзывов токенов
+func SetRevocationStore(s RevocationStore) {
+	store = s
+}
 
 // Установить секретный ключ (вызывается из main.go)
 func SetJWTSecret(secret string) {
@@ -46,16 +59,26 @@ func GetJWTSecret() []byte {
 }
 
 // BlacklistJTI помечает jti отозванным до момента expiresAt.
-func BlacklistJTI(jti string, expiresAt time.Time) {
+func BlacklistJTI(ctx context.Context, jti string, expiresAt time.Time) {
+	if store != nil {
+		_ = store.Revoke(ctx, jti, expiresAt)
+		return
+	}
 	revokedJTIsMu.Lock()
-	defer revokedJTIsMu.Unlock()
 	revokedJTIs[jti] = expiresAt
+	revokedJTIsMu.Unlock()
 }
 
 // IsJTIRevoked проверяет, отозван ли jti (и чистит просроченные записи).
-func IsJTIRevoked(jti string) bool {
+func IsJTIRevoked(ctx context.Context, jti string) bool {
+	if store != nil {
+		ok, err := store.IsRevoked(ctx, jti)
+		if err == nil {
+			return ok
+		}
+		// on error fallback to in-memory
+	}
 	revokedJTIsMu.Lock()
-	defer revokedJTIsMu.Unlock()
 	// Очистка просроченных
 	now := time.Now()
 	for k, v := range revokedJTIs {
@@ -63,16 +86,23 @@ func IsJTIRevoked(jti string) bool {
 			delete(revokedJTIs, k)
 		}
 	}
-
 	exp, ok := revokedJTIs[jti]
+	revokedJTIsMu.Unlock()
 	return ok && now.Before(exp)
 }
 
 // ValidateToken — middleware для проверки JWT, извлекаемого из куки
 func ValidateToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := slog.With(
+			"path", r.URL.Path,
+			"method", r.Method,
+			"user_agent", r.UserAgent(),
+		)
+
 		cookie, err := r.Cookie("token")
 		if err != nil {
+			logger.Warn("Authorization cookie missing", "error", err.Error())
 			http.Error(w, "Authorization cookie is missing", http.StatusUnauthorized)
 			return
 		}
@@ -81,6 +111,7 @@ func ValidateToken(next http.Handler) http.Handler {
 
 		// Добавляем проверку на минимальную длину, чтобы отсечь очевидно неверные токены
 		if len(tokenString) < 30 {
+			logger.Warn("Invalid token format - too short", "token_length", len(tokenString))
 			http.Error(w, "Invalid token format", http.StatusUnauthorized)
 			return
 		}
@@ -97,20 +128,38 @@ func ValidateToken(next http.Handler) http.Handler {
 		})
 
 		if err != nil {
-			log.Printf("ValidateToken: token invalid: %v", err)
+			logger.Warn("Token parsing failed", "error", err.Error())
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
 
 		if !token.Valid {
+			logger.Warn("Token validation failed")
 			http.Error(w, "Token validation failed", http.StatusUnauthorized)
 			return
 		}
 
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			log.Println("ValidateToken: failed to parse claims")
+			logger.Error("Failed to parse token claims")
 			http.Error(w, "Failed to parse token claims", http.StatusUnauthorized)
+			return
+		}
+
+		// Извлечение и проверка JTI для быстрой проверки отзыва
+		var jti string
+		if jtiVal, ok := claims["jti"].(string); ok && jtiVal != "" {
+			jti = jtiVal
+		} else {
+			logger.Warn("Missing or invalid JTI in token")
+			http.Error(w, "Invalid token structure", http.StatusUnauthorized)
+			return
+		}
+
+		// Оптимизированная проверка JTI - сначала быстрая проверка в памяти
+		if IsJTIRevoked(r.Context(), jti) {
+			logger.Info("Token revoked", "jti", jti)
+			http.Error(w, "Token revoked", http.StatusUnauthorized)
 			return
 		}
 
@@ -118,10 +167,12 @@ func ValidateToken(next http.Handler) http.Handler {
 		if exp, ok := claims["exp"].(float64); ok {
 			expTime := time.Unix(int64(exp), 0)
 			if time.Now().After(expTime) {
+				logger.Info("Token expired", "jti", jti, "exp", expTime)
 				http.Error(w, "Token has expired", http.StatusUnauthorized)
 				return
 			}
 		} else {
+			logger.Warn("Missing expiration time in token", "jti", jti)
 			http.Error(w, "Invalid expiration time in token", http.StatusUnauthorized)
 			return
 		}
@@ -130,20 +181,16 @@ func ValidateToken(next http.Handler) http.Handler {
 		if iat, ok := claims["iat"].(float64); ok {
 			issuedAt := time.Unix(int64(iat), 0)
 			if issuedAt.After(time.Now().Add(5 * time.Minute)) {
+				logger.Warn("Token issued in future", "jti", jti, "iat", issuedAt)
 				http.Error(w, "Token issued in the future", http.StatusUnauthorized)
 				return
 			}
 		}
 
-		// Проверка jti на отзыв
-		if jti, ok := claims["jti"].(string); ok && IsJTIRevoked(jti) {
-			http.Error(w, "Token revoked", http.StatusUnauthorized)
-			return
-		}
-
 		// Извлечение ID пользователя
 		userID, ok := claims["id"].(float64)
 		if !ok {
+			logger.Warn("Invalid user ID in token", "jti", jti)
 			http.Error(w, "Invalid user ID in token", http.StatusUnauthorized)
 			return
 		}
@@ -152,15 +199,10 @@ func ValidateToken(next http.Handler) http.Handler {
 		roleValue, _ := claims["role"].(string)
 		if roleValue != "" {
 			if roleValue != string(models.RoleUser) && roleValue != string(models.RoleManager) {
+				logger.Warn("Invalid user role in token", "jti", jti, "role", roleValue)
 				http.Error(w, "Invalid user role value in token", http.StatusUnauthorized)
 				return
 			}
-		}
-
-		// Извлечение JWT ID (jti)
-		var tokenID string
-		if jti, ok := claims["jti"].(string); ok {
-			tokenID = jti
 		}
 
 		// Создаем контекст с данными из токена
@@ -168,12 +210,17 @@ func ValidateToken(next http.Handler) http.Handler {
 		if roleValue != "" {
 			ctx = context.WithValue(ctx, RoleKey, roleValue)
 		}
-		if tokenID != "" {
-			ctx = context.WithValue(ctx, TokenIDKey, tokenID)
-		}
+		ctx = context.WithValue(ctx, TokenIDKey, jti)
 		if iat, ok := claims["iat"].(float64); ok {
 			ctx = context.WithValue(ctx, TokenIssuedKey, time.Unix(int64(iat), 0))
 		}
+
+		// Логируем успешную аутентификацию
+		logger.Info("Token validated successfully",
+			"user_id", int(userID),
+			"role", roleValue,
+			"jti", jti,
+		)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

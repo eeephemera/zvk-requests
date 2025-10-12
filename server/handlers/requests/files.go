@@ -79,7 +79,8 @@ func (h *RequestHandler) DownloadFileHandler(w http.ResponseWriter, r *http.Requ
 	// 6. Заголовки кеширования/валидации
 	etag := fmt.Sprintf("\"file-%d-%d-%d\"", fileInfo.ID, fileInfo.FileSize, fileInfo.CreatedAt.Unix())
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	// Для чувствительных файлов избегаем кэширования на клиенте/прокси
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Accept-Ranges", "bytes")
 	lastModified := fileInfo.CreatedAt.UTC().Format(http.TimeFormat)
 	w.Header().Set("Last-Modified", lastModified)

@@ -1,0 +1,9 @@
+node_modules/
+client/
+server
+server.exe
+server_new
+zvk-requests.exe
+*.exe
+*.log
+

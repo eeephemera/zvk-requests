@@ -32,8 +32,6 @@ WORKDIR /app
 
 # Копируем скомпилированное приложение
 COPY --from=builder /app/main .
-# Копируем .env файл под другим именем напрямую в конечный образ
-COPY .env /app/config.env
 # Копируем migrate ИЗ ЭТАПА СБОРКИ
 COPY --from=builder /go/bin/migrate /usr/local/bin/
 

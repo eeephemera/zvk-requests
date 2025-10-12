@@ -73,16 +73,25 @@ func ValidatePassword(password string) error {
 
 func CSRFProtection(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Пропускаем GET, HEAD, OPTIONS
-		if r.Method == "GET" || r.Method == "HEAD" || r.Method == "OPTIONS" {
+		// Пропускаем безопасные методы
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Проверяем CSRF-токен в заголовке
-		csrfToken := r.Header.Get("X-CSRF-Token")
-		if csrfToken == "" {
-			http.Error(w, "Invalid CSRF token", http.StatusForbidden)
+		// Double-submit token: сравниваем заголовок и cookie
+		headerToken := r.Header.Get("X-CSRF-Token")
+		if headerToken == "" {
+			http.Error(w, "Missing CSRF token", http.StatusForbidden)
+			return
+		}
+		cookie, err := r.Cookie("csrf_token")
+		if err != nil || cookie.Value == "" {
+			http.Error(w, "Missing CSRF cookie", http.StatusForbidden)
+			return
+		}
+		if cookie.Value != headerToken {
+			http.Error(w, "CSRF token mismatch", http.StatusForbidden)
 			return
 		}
 

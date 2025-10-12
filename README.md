@@ -1,45 +1,54 @@
 # ZVK Requests
 
-Web application for managing business requests and deal registrations.
+Веб‑приложение для управления заявками и регистрацией сделок.
 
-## Features
+## Архитектура
 
-- User authentication and authorization
-- Deal registration form with real-time validation
-- Manager dashboard for request management
-- File attachments support
-- Client search by INN (Tax ID)
+- `client/` — фронтенд (Next.js, TypeScript)
+- `server/` — бэкенд (Go), без клиентских артефактов
+  - JWT в `HttpOnly` cookie + refresh‑ротация
+  - CSRF (double‑submit cookie `csrf_token` + заголовок `X-CSRF-Token`)
+  - Rate limiting (IP/route, временная блокировка)
+  - Структурированное логирование через `log/slog`
 
-## Tech Stack
+## Возможности
+
+- Аутентификация и авторизация (роли `USER`/`MANAGER`)
+- Регистрация заявок с валидацией
+- Кабинет менеджера для управления заявками
+- Прикрепление и скачивание файлов
+- Поиск клиентов по ИНН
+
+## Технологии
 
 ### Frontend (Next.js)
-- TypeScript
-- React Query for data fetching
-- TailwindCSS for styling
-- Form handling with React Hook Form
+- TypeScript, React, React Query
+- TailwindCSS
+- React Hook Form
 
 ### Backend (Go)
-- Go standard library for HTTP server
-- PostgreSQL database
-- JWT authentication
+- Go HTTP + Gorilla Mux
+- PostgreSQL (pgx/v5)
+- JWT (`golang-jwt/jwt/v5`), bcrypt
+- `log/slog` для structured logging
 
-## Local Development
+## Локальная разработка
 
-### Prerequisites
-- Node.js 18+ and npm
-- Go 1.21+
+### Требования
+- Node.js 18+ и npm
+- Go 1.24+
 - PostgreSQL 15+
-- Docker and Docker Compose (optional)
+- Docker и Docker Compose (опционально)
 
-### Getting Started
+### Старт
 
-1. Clone the repository:
+1) Клонировать репозиторий
 ```bash
 git clone https://github.com/eeephemera/zvk-requests.git
 cd zvk-requests
 ```
 
-2. Install dependencies:
+2) Установить зависимости
 ```bash
 # Frontend
 cd client
@@ -50,43 +59,63 @@ cd ../server
 go mod download
 ```
 
-3. Set up environment variables:
+3) Переменные окружения
 ```bash
 # client/.env.local
-NEXT_PUBLIC_API_URL=http://localhost:8080
+NEXT_PUBLIC_API_URL=http://localhost:8081
 
-# server/.env
+# server/.env (или переменные окружения)
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
 DB_PASSWORD=your_password
 DB_NAME=zvk_requests
 JWT_SECRET=your_secret_key
+APP_ENV=development
+JWT_EXPIRATION=60m
+REFRESH_EXPIRATION=720h
+RATE_LIMIT_WINDOW_SECONDS=60
+RATE_LIMIT_MAX_REQUESTS=300
+RATE_LIMIT_LOGIN_PER_MIN=20
 ```
 
-4. Run the development servers:
+4) Запуск в dev
 ```bash
-# Frontend (in client directory)
+# Frontend
+cd client
 npm run dev
 
-# Backend (in server directory)
+# Backend
+cd ../server
 go run main.go
 ```
 
-5. Open http://localhost:3000 in your browser
+Откройте http://localhost:3000.
 
-### Docker Setup
+## Docker
 
-Alternatively, use Docker Compose:
+Бэкенд: `server/Dockerfile` (multi‑stage, бинарник `main`).
 
+Пример (в корне):
 ```bash
-docker-compose up -d
+docker build -t zvk-requests-api ./server
+docker run --env-file server/.env -p 8081:8081 zvk-requests-api
 ```
 
-## Production Deployment
+Если используете Compose, убедитесь, что фронтенд и бэкенд — отдельные сервисы (`client` и `api`), а Nginx/прокси отдает `SameSite=None; Secure` для cookie в проде.
 
-The application is configured for deployment on Vercel (frontend) and any container platform (backend).
+## Примечания по безопасности
 
-## License
+- Access‑token: `HttpOnly` cookie `token`, `SameSite=None`, `Secure` в проде
+- Refresh‑token: `HttpOnly` cookie `refresh_token`, ротация + JTI‑blacklist
+- CSRF: double‑submit (`csrf_token` cookie + `X-CSRF-Token` header)
+- Rate limit: IP/маршрут, временная блокировка при превышении
+- Пароли: bcrypt, авто‑rehash при входе при изменении cost
 
-This project is proprietary software. All rights reserved.
+## Продакшн
+
+Фронтенд — Vercel/статический хостинг. Бэкенд — любой контейнерный хостинг. Nginx/ingress должен проксировать `/api/*` и корректно передавать/экспонировать заголовки `Set-Cookie`.
+
+## Лицензия
+
+Proprietary. All rights reserved.

@@ -4,32 +4,50 @@ package middleware
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
 // RateLimiter предоставляет базовую защиту от DoS и брутфорс атак.
 type RateLimiter struct {
-	mu           sync.Mutex
-	ipRequests   map[string][]time.Time
-	pathRequests map[string][]time.Time
-	windowSize   time.Duration
-	maxRequests  int
+	mu            sync.Mutex
+	ipRequests    map[string][]time.Time
+	pathRequests  map[string][]time.Time
+	blockedIPs    map[string]time.Time // Временная блокировка IP
+	windowSize    time.Duration
+	maxRequests   int
+	blockDuration time.Duration // Длительность блокировки
 }
 
 // NewRateLimiter создает новый экземпляр ограничителя запросов.
 // windowSize - временное окно для подсчета запросов (например, 1 минута).
 // maxRequests - максимальное количество запросов в окне.
+// blockDuration - длительность блокировки IP при превышении лимита (по умолчанию 5 минут).
 func NewRateLimiter(windowSize time.Duration, maxRequests int) *RateLimiter {
 	return &RateLimiter{
-		ipRequests:   make(map[string][]time.Time),
-		pathRequests: make(map[string][]time.Time),
-		windowSize:   windowSize,
-		maxRequests:  maxRequests,
+		ipRequests:    make(map[string][]time.Time),
+		pathRequests:  make(map[string][]time.Time),
+		blockedIPs:    make(map[string]time.Time),
+		windowSize:    windowSize,
+		maxRequests:   maxRequests,
+		blockDuration: 5 * time.Minute, // Блокировка на 5 минут по умолчанию
 	}
 }
 
-// cleanup удаляет устаревшие записи о запросах.
+// NewRateLimiterWithBlock создает RateLimiter с кастомной длительностью блокировки.
+func NewRateLimiterWithBlock(windowSize time.Duration, maxRequests int, blockDuration time.Duration) *RateLimiter {
+	return &RateLimiter{
+		ipRequests:    make(map[string][]time.Time),
+		pathRequests:  make(map[string][]time.Time),
+		blockedIPs:    make(map[string]time.Time),
+		windowSize:    windowSize,
+		maxRequests:   maxRequests,
+		blockDuration: blockDuration,
+	}
+}
+
+// cleanup удаляет устаревшие записи о запросах и блокировках.
 func (rl *RateLimiter) cleanup() {
 	now := time.Now()
 	threshold := now.Add(-rl.windowSize)
@@ -63,11 +81,44 @@ func (rl *RateLimiter) cleanup() {
 			rl.pathRequests[path] = validTimes
 		}
 	}
+
+	// Очистка просроченных блокировок IP
+	for ip, blockedUntil := range rl.blockedIPs {
+		if now.After(blockedUntil) {
+			delete(rl.blockedIPs, ip)
+		}
+	}
+}
+
+// isBlocked проверяет, заблокирован ли IP адрес.
+func (rl *RateLimiter) isBlocked(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	blockedUntil, exists := rl.blockedIPs[ip]
+	if !exists {
+		return false
+	}
+
+	if time.Now().After(blockedUntil) {
+		delete(rl.blockedIPs, ip)
+		return false
+	}
+
+	return true
+}
+
+// blockIP блокирует IP адрес на указанное время.
+func (rl *RateLimiter) blockIP(ip string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	rl.blockedIPs[ip] = time.Now().Add(rl.blockDuration)
 }
 
 // isLimited проверяет, превышен ли лимит запросов.
 func (rl *RateLimiter) isLimited(key string, requests map[string][]time.Time) bool {
-	// Очищаем старые запросы
+	// Очищаем старые запросы и блокировки
 	rl.cleanup()
 
 	// Если количество запросов превышает лимит, возвращаем true
@@ -91,26 +142,46 @@ func (rl *RateLimiter) respondTooManyRequests(w http.ResponseWriter) {
 // LimitByIP создает middleware для ограничения по IP адресу.
 func (rl *RateLimiter) LimitByIP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rl.mu.Lock()
-		defer rl.mu.Unlock()
-
-		// Получаем реальный IP пользователя
-		ip := r.Header.Get("X-Real-IP")
-		if ip == "" {
-			ip = r.Header.Get("X-Forwarded-For")
-			if ip == "" {
-				ip = r.RemoteAddr
+		// Получаем реальный IP пользователя (первый из X-Forwarded-For)
+		ip := r.Header.Get("X-Forwarded-For")
+		if ip != "" {
+			// берём первый hop
+			if comma := strings.Index(ip, ","); comma != -1 {
+				ip = strings.TrimSpace(ip[:comma])
+			} else {
+				ip = strings.TrimSpace(ip)
 			}
 		}
+		if ip == "" {
+			ip = r.Header.Get("X-Real-IP")
+		}
+		if ip == "" {
+			ip = r.RemoteAddr
+		}
+
+		// Проверяем, заблокирован ли IP
+		if rl.isBlocked(ip) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", rl.blockDuration.Seconds()))
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":"IP blocked due to rate limit exceeded"}`))
+			return
+		}
+
+		rl.mu.Lock()
 
 		// Проверяем лимит
 		if rl.isLimited(ip, rl.ipRequests) {
+			// Блокируем IP при превышении лимита
+			rl.blockIP(ip)
+			rl.mu.Unlock()
 			rl.respondTooManyRequests(w)
 			return
 		}
 
 		// Регистрируем запрос
 		rl.addRequest(ip, rl.ipRequests)
+		rl.mu.Unlock()
 
 		next.ServeHTTP(w, r)
 	})
@@ -137,9 +208,6 @@ func (rl *RateLimiter) LimitByPath(paths []string, stricterLimit int) func(http.
 				return
 			}
 
-			rl.mu.Lock()
-			defer rl.mu.Unlock()
-
 			// Получаем IP
 			ip := r.Header.Get("X-Real-IP")
 			if ip == "" {
@@ -148,6 +216,17 @@ func (rl *RateLimiter) LimitByPath(paths []string, stricterLimit int) func(http.
 					ip = r.RemoteAddr
 				}
 			}
+
+			// Проверяем, заблокирован ли IP
+			if rl.isBlocked(ip) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", fmt.Sprintf("%.0f", rl.blockDuration.Seconds()))
+				w.WriteHeader(http.StatusTooManyRequests)
+				w.Write([]byte(`{"error":"IP blocked due to rate limit exceeded"}`))
+				return
+			}
+
+			rl.mu.Lock()
 
 			// Создаем ключ ip:path для более точного отслеживания
 			key := ip + ":" + path
@@ -161,12 +240,16 @@ func (rl *RateLimiter) LimitByPath(paths []string, stricterLimit int) func(http.
 
 			requests := rl.pathRequests
 			if len(requests[key]) >= currentLimit {
+				// Блокируем IP при превышении лимита
+				rl.blockIP(ip)
+				rl.mu.Unlock()
 				rl.respondTooManyRequests(w)
 				return
 			}
 
 			// Регистрируем запрос
 			rl.addRequest(key, requests)
+			rl.mu.Unlock()
 
 			next.ServeHTTP(w, r)
 		})

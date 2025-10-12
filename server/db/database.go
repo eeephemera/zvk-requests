@@ -17,12 +17,17 @@ var (
 // ConnectDB устанавливает соединение с базой данных PostgreSQL.
 // Использует повторные попытки с экспоненциальной задержкой.
 func ConnectDB(ctx context.Context) error {
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+	sslMode := os.Getenv("DB_SSLMODE")
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		os.Getenv("DB_HOST"),
 		os.Getenv("DB_PORT"),
 		os.Getenv("DB_USER"),
 		os.Getenv("DB_PASSWORD"),
 		os.Getenv("DB_NAME"),
+		sslMode,
 	)
 
 	maxAttempts := 10

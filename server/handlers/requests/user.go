@@ -50,7 +50,9 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 	}
 
 	// 3. Парсим multipart form
-	// Лимит тела и multipart: 15MB (соответствует UI)
+	// Глобальный лимит тела запроса
+	r.Body = http.MaxBytesReader(w, r.Body, 20<<20) // 20MB
+	// Лимит multipart: 15MB (как на UI)
 	err = r.ParseMultipartForm(15 << 20)
 	log.Printf("Результат ParseMultipartForm (nil - это хорошо): %v", err) // Логируем ошибку парсинга
 	if err != nil {
@@ -175,9 +177,22 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 				return
 			}
 
+			// MIME allowlist проверка
+			contentType := fileHeader.Header.Get("Content-Type")
+			if contentType == "" {
+				contentType = http.DetectContentType(fileBytes)
+			}
+			switch contentType {
+			case "application/pdf", "image/png", "image/jpeg", "text/plain":
+				// ok
+			default:
+				handlers.RespondWithError(w, http.StatusBadRequest, "Unsupported file type")
+				return
+			}
+
 			newFile := &models.File{
 				FileName: utils.SanitizeFilename(fileHeader.Filename),
-				MimeType: fileHeader.Header.Get("Content-Type"),
+				MimeType: contentType,
 				FileSize: fileHeader.Size,
 				FileData: fileBytes,
 			}

@@ -5,3 +5,9 @@
  
 ALTER TABLE requests
 DROP COLUMN IF EXISTS overall_tz_file_id; 
+
+-- Create table for revoked JWTs if not exists
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+    jti text PRIMARY KEY,
+    expires_at timestamptz NOT NULL
+); 

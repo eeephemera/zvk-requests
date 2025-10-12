@@ -1,0 +1,23 @@
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  enable:
+    - govet
+    - gosimple
+    - staticcheck
+    - ineffassign
+    - misspell
+    - gosec
+    - gocritic
+    - prealloc
+    - errcheck
+    - bodyclose
+
+issues:
+  exclude-rules:
+    - linters:
+        - gosec
+      text: "G404|G107" # allow weak rand in tests and URL construction in this project where appropriate
+

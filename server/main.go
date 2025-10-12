@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/eeephemera/zvk-requests/server/db"
@@ -15,15 +15,19 @@ import (
 	requests_handler "github.com/eeephemera/zvk-requests/server/handlers/requests"
 	"github.com/eeephemera/zvk-requests/server/middleware"
 	"github.com/eeephemera/zvk-requests/server/models"
+	"github.com/eeephemera/zvk-requests/server/utils"
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	// Загружаем переменные окружения
-	if err := godotenv.Load("/app/config.env"); err != nil {
-		log.Println("Warning: .env file not found or error loading it")
+	// Инициализируем структурированное логирование
+	initLogging()
+
+	// В dev-режиме можно подгружать локальный .env (без запекания в образ)
+	if os.Getenv("APP_ENV") != "production" {
+		_ = godotenv.Load() // опционально: .env в рабочей директории
 	}
 
 	// Проверяем наличие необходимых переменных окружения
@@ -48,30 +52,41 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	slog.Info("Подключение к базе данных...")
 	if err := db.ConnectDB(ctx); err != nil {
+		slog.Error("Ошибка подключения к базе данных", "error", err)
 		log.Fatalf("Ошибка подключения к базе данных: %v", err)
 	}
 	defer db.CloseDBConnection()
+	slog.Info("Подключение к базе данных установлено")
 
 	pool := db.GetPool()
 	if pool == nil {
+		slog.Error("Не удалось получить пул подключений к БД")
 		log.Fatal("Не удалось получить пул подключений к БД")
 	}
 
 	// Инициализируем все репозитории
+	slog.Info("Инициализация репозиториев...")
 	userRepo := db.NewUserRepository(pool)
 	partnerRepo := db.NewPartnerRepository(pool)
 	endClientRepo := db.NewEndClientRepository(pool)
 	requestRepo := db.NewRequestRepository(pool)
+	slog.Info("Репозитории инициализированы")
 
 	// Инициализируем обработчики
+	slog.Info("Инициализация обработчиков...")
 	requestHandler := requests_handler.NewRequestHandler(requestRepo, userRepo, partnerRepo, endClientRepo)
 	authHandler := handlers.NewAuthHandler(userRepo, partnerRepo)
 	partnerHandler := handlers.NewPartnerHandler(partnerRepo)
 	endClientHandler := handlers.NewEndClientHandler(endClientRepo)
+	slog.Info("Обработчики инициализированы")
 
 	// Создаем основной роутер
 	r := mux.NewRouter()
+
+	// Настраиваем персистентное хранилище отзывов токенов (через БД)
+	middleware.SetRevocationStore(db.RevocationStoreDB{})
 
 	// Health check endpoint
 	r.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -92,19 +107,11 @@ func main() {
 			maxReq = n
 		}
 	}
-	rateLimiter := middleware.NewRateLimiter(window, maxReq)
+	rateLimiter := middleware.NewRateLimiterWithBlock(window, maxReq, 15*time.Minute)
 
-	// Базовый rate limiter для всех запросов (кроме некоторых GET/OPTIONS)
+	// Базовый rate limiter для всех запросов
 	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			// Освобождаем "легкие" методы/эндпойнты от общего лимитера
-			if (req.Method == http.MethodGet || req.Method == http.MethodOptions) &&
-				(req.URL.Path == "/api/me" || strings.HasPrefix(req.URL.Path, "/api/end-clients/search")) {
-				next.ServeHTTP(w, req)
-				return
-			}
-			rateLimiter.LimitByIP(next).ServeHTTP(w, req)
-		})
+		return rateLimiter.LimitByIP(next)
 	})
 
 	// Специальный rate limiter для авторизации (более строгий: по умолчанию 20/мин)
@@ -114,7 +121,7 @@ func main() {
 			loginMax = n
 		}
 	}
-	loginLimiter := middleware.NewRateLimiter(1*time.Minute, loginMax)
+	loginLimiter := middleware.NewRateLimiterWithBlock(1*time.Minute, loginMax, 30*time.Minute)
 
 	// CORS middleware (УДАЛЕНО, теперь обрабатывается Nginx)
 	// r.Use(func(next http.Handler) http.Handler {
@@ -158,11 +165,17 @@ func main() {
 	loginRouter.Use(loginLimiter.LimitByPath([]string{"/api/login"}, loginMax))
 	loginRouter.HandleFunc("", authHandler.LoginUser).Methods("POST")
 
+	// Отдельный лимит для чувствительных GET, например /api/end-clients/search
+	sensitiveGetLimiter := middleware.NewRateLimiterWithBlock(1*time.Minute, 120, 10*time.Minute)
+	r.PathPrefix("/api/end-clients/search").Handler(sensitiveGetLimiter.LimitByIP(http.HandlerFunc(endClientHandler.SearchByINNHandler))).Methods("GET", "OPTIONS")
+
 	r.HandleFunc("/api/logout", handlers.LogoutUser).Methods("POST")
 
 	// Защищенные маршруты
 	authRouter := r.PathPrefix("/api").Subrouter()
 	authRouter.Use(middleware.ValidateToken)
+	// CSRF защита для всех мутирующих методов под /api
+	authRouter.Use(utils.CSRFProtection)
 
 	authRouter.HandleFunc("/me", authHandler.Me).Methods("GET", "OPTIONS")
 	authRouter.HandleFunc("/refresh", handlers.RefreshToken).Methods("POST", "OPTIONS")
@@ -174,6 +187,8 @@ func main() {
 	// --- Маршруты для партнеров (USER) ---
 	userRouter := authRouter.PathPrefix("/requests").Subrouter()
 	userRouter.Use(middleware.RequireRole(string(models.RoleUser)))
+	// Валидация для создания заявки (middleware)
+	userRouter.Use(middleware.ValidateRequest(middleware.ValidateCreateRequest))
 	userRouter.HandleFunc("", requestHandler.CreateRequestHandlerNew).Methods("POST")
 	userRouter.HandleFunc("/my", requestHandler.ListMyRequestsHandler).Methods("GET")
 	userRouter.HandleFunc("/my/{id:[0-9]+}", requestHandler.GetMyRequestDetailsHandler).Methods("GET")
@@ -205,23 +220,25 @@ func main() {
 	signal.Notify(stopChan, os.Interrupt)
 
 	go func() {
-		log.Printf("Сервер запущен на %s\n", server.Addr)
+		slog.Info("Запуск сервера", "address", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("Ошибка сервера", "error", err)
 			log.Fatalf("Ошибка сервера: %v", err)
 		}
 	}()
 
 	<-stopChan
-	log.Println("Остановка сервера...")
+	slog.Info("Получен сигнал остановки, начинаем graceful shutdown...")
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Error("Ошибка при завершении работы сервера", "error", err)
 		log.Printf("Ошибка при завершении работы: %v\n", err)
 	}
 
-	log.Println("Сервер успешно остановлен")
+	slog.Info("Сервер успешно остановлен")
 }
 
 // getServerPort возвращает порт сервера из переменной окружения или значение по умолчанию
@@ -231,4 +248,30 @@ func getServerPort() string {
 		port = "8081" // Значение по умолчанию
 	}
 	return port
+}
+
+// initLogging инициализирует структурированное логирование
+func initLogging() {
+	logLevel := slog.LevelInfo
+	if os.Getenv("APP_ENV") == "development" {
+		logLevel = slog.LevelDebug
+	}
+
+	opts := &slog.HandlerOptions{
+		Level: logLevel,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, opts))
+	slog.SetDefault(logger)
+
+	slog.Info("Структурированное логирование инициализировано",
+		"level", logLevel.String(),
+		"env", os.Getenv("APP_ENV"),
+	)
 }
