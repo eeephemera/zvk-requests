@@ -1,6 +1,6 @@
 services:
   server:
-    image: ${DOCKERHUB_USERNAME}/zvk-requests-server:latest
+    image: eeephemera/zvk-requests-server:latest
     pull_policy: always
     restart: unless-stopped
     ports:
