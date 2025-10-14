@@ -345,7 +345,7 @@ func (h *RequestHandler) GetMyRequestDetailsHandler(w http.ResponseWriter, r *ht
 
 	// 5. Отправляем ответ
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(req)
+	_ = json.NewEncoder(w).Encode(req)
 }
 
 // DeleteMyRequestHandler - Удаление конкретной заявки пользователя

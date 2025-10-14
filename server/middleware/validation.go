@@ -45,7 +45,7 @@ func ValidateRequest(validationFunc func(r *http.Request) []ValidationError) fun
 			if len(errors) > 0 {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(ValidationResponse{Errors: errors})
+				_ = json.NewEncoder(w).Encode(ValidationResponse{Errors: errors})
 				return
 			}
 

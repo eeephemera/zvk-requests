@@ -91,7 +91,7 @@ func main() {
 	// Health check endpoint
 	r.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	}).Methods("GET", "OPTIONS")
 
 	// Инициализируем RateLimiter (читаем значения из ENV)
@@ -211,8 +211,12 @@ func main() {
 
 	// Создаем HTTP сервер
 	server := &http.Server{
-		Addr:    ":" + getServerPort(),
-		Handler: r,
+		Addr:              ":" + getServerPort(),
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second, // Защита от Slowloris атак
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Обработка graceful shutdown

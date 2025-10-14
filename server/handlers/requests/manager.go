@@ -83,7 +83,7 @@ func (h *RequestHandler) UpdateRequestStatusHandler(w http.ResponseWriter, r *ht
 	if err != nil {
 		log.Printf("UpdateRequestStatusHandler: updated fetch failed for request %d: %v", requestID, err)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"message": "Request status updated successfully"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "Request status updated successfully"})
 		return
 	}
 	handlers.RespondWithJSON(w, http.StatusOK, updatedReq)

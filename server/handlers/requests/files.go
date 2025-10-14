@@ -110,7 +110,7 @@ func (h *RequestHandler) DownloadFileHandler(w http.ResponseWriter, r *http.Requ
 	if rangeHeader == "" {
 		w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
 		w.WriteHeader(http.StatusOK)
-		w.Write(fileData)
+		_, _ = w.Write(fileData)
 		return
 	}
 
@@ -161,7 +161,7 @@ func (h *RequestHandler) DownloadFileHandler(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
 	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	w.WriteHeader(http.StatusPartialContent)
-	w.Write(fileData[start : end+1])
+	_, _ = w.Write(fileData[start : end+1])
 }
 
 // ListRequestFilesForManager возвращает список файлов заявки для менеджера

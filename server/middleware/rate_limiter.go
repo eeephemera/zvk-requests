@@ -169,7 +169,7 @@ func (rl *RateLimiter) LimitByIP(next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", rl.blockDuration.Seconds()))
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error":"IP blocked due to rate limit exceeded"}`))
+			_, _ = w.Write([]byte(`{"error":"IP blocked due to rate limit exceeded"}`))
 			return
 		}
 
@@ -183,8 +183,6 @@ func (rl *RateLimiter) LimitByIP(next http.Handler) http.Handler {
 			rl.respondTooManyRequests(w)
 			return
 		}
-		//фвцфцв
-
 		// Регистрируем запрос
 		rl.addRequest(ip, rl.ipRequests)
 		rl.mu.Unlock()
@@ -228,7 +226,7 @@ func (rl *RateLimiter) LimitByPath(paths []string, stricterLimit int) func(http.
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Retry-After", fmt.Sprintf("%.0f", rl.blockDuration.Seconds()))
 				w.WriteHeader(http.StatusTooManyRequests)
-				w.Write([]byte(`{"error":"IP blocked due to rate limit exceeded"}`))
+				_, _ = w.Write([]byte(`{"error":"IP blocked due to rate limit exceeded"}`))
 				return
 			}
 

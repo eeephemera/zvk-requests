@@ -413,7 +413,7 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Token refreshed successfully", "user_id", userID, "new_access_jti", newAccessJTI, "new_refresh_jti", newRefreshJTI)
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "Token refreshed",
 	})
 }
@@ -500,7 +500,7 @@ func LogoutUser(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("User logged out successfully")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message": "Logged out successfully",
 	})
 }
