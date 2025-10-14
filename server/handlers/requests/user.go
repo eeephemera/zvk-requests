@@ -220,7 +220,7 @@ func (h *RequestHandler) CreateRequestHandlerNew(w http.ResponseWriter, r *http.
 	}
 
 	if requestDTO.Quantity != nil && unitPriceDecimal != nil {
-		quantityDecimal := decimal.NewFromInt32(int32(*requestDTO.Quantity))
+		quantityDecimal := decimal.NewFromInt(int64(*requestDTO.Quantity))
 		calculatedTotal := quantityDecimal.Mul(*unitPriceDecimal)
 		totalPrice = &calculatedTotal
 	}
