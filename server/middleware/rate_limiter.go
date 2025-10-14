@@ -31,7 +31,7 @@ func NewRateLimiter(windowSize time.Duration, maxRequests int) *RateLimiter {
 		blockedIPs:    make(map[string]time.Time),
 		windowSize:    windowSize,
 		maxRequests:   maxRequests,
-		blockDuration: 5 * time.Minute, // Блокировка на 5 минут по умолчанию
+		blockDuration: 10 * time.Second, // Блокировка на 10 секунд
 	}
 }
 
