@@ -108,14 +108,6 @@ func (rl *RateLimiter) isBlocked(ip string) bool {
 	return true
 }
 
-// blockIP блокирует IP адрес на указанное время.
-func (rl *RateLimiter) blockIP(ip string) {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	rl.blockedIPs[ip] = time.Now().Add(rl.blockDuration)
-}
-
 // blockIPUnsafe блокирует IP без захвата mutex (вызывается когда mutex уже захвачен).
 func (rl *RateLimiter) blockIPUnsafe(ip string) {
 	rl.blockedIPs[ip] = time.Now().Add(rl.blockDuration)
