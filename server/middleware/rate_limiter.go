@@ -116,6 +116,11 @@ func (rl *RateLimiter) blockIP(ip string) {
 	rl.blockedIPs[ip] = time.Now().Add(rl.blockDuration)
 }
 
+// blockIPUnsafe блокирует IP без захвата mutex (вызывается когда mutex уже захвачен).
+func (rl *RateLimiter) blockIPUnsafe(ip string) {
+	rl.blockedIPs[ip] = time.Now().Add(rl.blockDuration)
+}
+
 // isLimited проверяет, превышен ли лимит запросов.
 func (rl *RateLimiter) isLimited(key string, requests map[string][]time.Time) bool {
 	// Очищаем старые запросы и блокировки
@@ -173,7 +178,7 @@ func (rl *RateLimiter) LimitByIP(next http.Handler) http.Handler {
 		// Проверяем лимит
 		if rl.isLimited(ip, rl.ipRequests) {
 			// Блокируем IP при превышении лимита
-			rl.blockIP(ip)
+			rl.blockIPUnsafe(ip)
 			rl.mu.Unlock()
 			rl.respondTooManyRequests(w)
 			return
@@ -241,7 +246,7 @@ func (rl *RateLimiter) LimitByPath(paths []string, stricterLimit int) func(http.
 			requests := rl.pathRequests
 			if len(requests[key]) >= currentLimit {
 				// Блокируем IP при превышении лимита
-				rl.blockIP(ip)
+				rl.blockIPUnsafe(ip)
 				rl.mu.Unlock()
 				rl.respondTooManyRequests(w)
 				return
