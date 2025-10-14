@@ -183,6 +183,7 @@ func (rl *RateLimiter) LimitByIP(next http.Handler) http.Handler {
 			rl.respondTooManyRequests(w)
 			return
 		}
+		//фвцфцв
 
 		// Регистрируем запрос
 		rl.addRequest(ip, rl.ipRequests)
