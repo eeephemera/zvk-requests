@@ -182,7 +182,7 @@ func main() {
 	authRouter.Use(utils.CSRFProtection)
 
 	authRouter.HandleFunc("/me", authHandler.Me).Methods("GET", "OPTIONS")
-	authRouter.HandleFunc("/refresh", handlers.RefreshToken).Methods("POST", "OPTIONS")
+	authRouter.HandleFunc("/refresh", authHandler.RefreshToken).Methods("POST", "OPTIONS")
 
 	// --- Новые маршруты для справочников ---
 	authRouter.HandleFunc("/partners", partnerHandler.ListPartnersHandler).Methods("GET", "OPTIONS")

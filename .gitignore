@@ -1,0 +1,41 @@
+# Compiled binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+
+# SQL dumps (use migrations instead)
+*.sql
+!init.sql
+!server/db/migrations/*.sql
+
+# Node
+node_modules/
+package-lock.json
+!client/package-lock.json
+

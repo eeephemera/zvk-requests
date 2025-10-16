@@ -49,11 +49,11 @@ function handleApiError(error: unknown): never {
   throw new ApiError('An unknown error occurred', 500);
 }
 
-// CSRF helper: read csrf_token cookie value (for double-submit protection)
-function getCSRFCookie(): string | null {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(/(?:^|; )csrf_token=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : null;
+// CSRF helper: read CSRF token from memory store (Custom Header protection)
+import { getCsrfToken } from '../lib/csrfStore';
+
+function getCSRFToken(): string | null {
+  return getCsrfToken();
 }
 
 // Helper function to fetch a blob with filename from content-disposition
@@ -108,7 +108,7 @@ export async function apiFetch<T>(
   // Attach CSRF token for non-idempotent requests
   const method = (options.method || 'GET').toString().toUpperCase();
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
-    const csrf = getCSRFCookie();
+    const csrf = getCSRFToken();
     if (csrf && !headers.has('X-CSRF-Token')) {
       headers.set('X-CSRF-Token', csrf);
     }
@@ -182,7 +182,7 @@ export class ApiClient {
     // Attach CSRF token for non-idempotent requests
     const method = (options.method || 'GET').toString().toUpperCase();
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
-      const csrf = getCSRFCookie();
+      const csrf = getCSRFToken();
       if (csrf && !headers.has('X-CSRF-Token')) {
         headers.set('X-CSRF-Token', csrf);
       }
@@ -250,8 +250,8 @@ export class ApiClient {
           xhr.setRequestHeader(key, value);
         });
 
-        // Attach CSRF token for double-submit
-        const csrf = getCSRFCookie();
+        // Attach CSRF token for Custom Header protection
+        const csrf = getCSRFToken();
         if (csrf) {
           xhr.setRequestHeader('X-CSRF-Token', csrf);
         }

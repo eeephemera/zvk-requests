@@ -24,6 +24,7 @@ type FormInputs = {
 type LoginApiResponse = {
   message: string;
   user: AuthResponse; // Используем тип из AuthContext
+  csrf_token: string; // CSRF токен для защиты
 };
 
 const getFriendlyErrorMessage = (error: string, status?: number): string => {
@@ -42,8 +43,8 @@ export default function LoginClient() {
   const [skipRedirect, setSkipRedirect] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Получаем функцию updateAuthState из контекста
-  const { isAuthenticated, updateAuthState } = useAuth(); 
+  // Получаем функцию updateAuthState и setCsrfToken из контекста
+  const { isAuthenticated, updateAuthState, setCsrfToken } = useAuth(); 
   
   // Проверка и инкремент счетчика попыток редиректа
   const shouldSkipRedirect = (): boolean => {
@@ -83,7 +84,6 @@ export default function LoginClient() {
   const onSubmit: SubmitHandler<FormInputs> = async (data) => {
     setError("");
     setIsLoading(true);
-    console.log("Attempting login...");
 
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/login`, {
@@ -104,22 +104,21 @@ export default function LoginClient() {
       }
 
       // Получаем данные пользователя напрямую из ответа
-      const responseData: LoginApiResponse = await res.json(); 
-      // ----- DEBUG LOG ----- 
-      console.log("Raw response from /api/login:", JSON.stringify(responseData, null, 2)); 
-      // ----- END DEBUG LOG ----- 
-      console.log("Login successful, received user data:", responseData.user);
+      const responseData: LoginApiResponse = await res.json();
       
       // Обновляем состояние авторизации в контексте
       updateAuthState(responseData.user);
       
+      // Сохраняем CSRF токен для защиты от CSRF атак
+      if (responseData.csrf_token) {
+        setCsrfToken(responseData.csrf_token);
+      }
+      
       // Получаем путь для редиректа из URL
       const fromPath = searchParams.get('from');
-      console.log("Redirect path from URL:", fromPath);
       
       // Используем отдельную функцию для определения домашней страницы на основе роли
       const defaultPath = getHomepageForRole(responseData.user.role);
-      console.log("Default path based on role:", defaultPath);
       
       // Определяем конечный путь редиректа
       let returnTo = fromPath || defaultPath;
@@ -128,8 +127,6 @@ export default function LoginClient() {
       if (returnTo === "/requests") {
         returnTo = "/my-requests";
       }
-      
-      console.log("Final redirect path:", returnTo);
 
       // Используем replace вместо push для избежания истории навигации
       router.replace(returnTo);

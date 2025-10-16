@@ -31,8 +31,9 @@ type LoginRequest struct {
 
 // Определяем структуру ответа для LoginUser, которая включает данные пользователя
 type LoginResponse struct {
-	Message string       `json:"message"`
-	User    *models.User `json:"user"`
+	Message   string       `json:"message"`
+	User      *models.User `json:"user"`
+	CsrfToken string       `json:"csrf_token"` // CSRF токен для Custom Header защиты
 }
 
 // setTokenCookie устанавливает JWT-токен в HttpOnly cookie.
@@ -58,17 +59,7 @@ func setTokenCookie(w http.ResponseWriter, tokenString string) {
 		SameSite: http.SameSiteNoneMode,
 	}
 	http.SetCookie(w, cookie)
-	// Выдаём CSRF cookie (Double-submit). Не HttpOnly, чтобы SPA могла читать
-	csrf := &http.Cookie{
-		Name:     "csrf_token",
-		Value:    utils.GenerateSecureRandomString(32),
-		Expires:  time.Now().Add(expiration),
-		HttpOnly: false,
-		Secure:   isProduction,
-		Path:     "/",
-		SameSite: http.SameSiteNoneMode,
-	}
-	http.SetCookie(w, csrf)
+	// CSRF токен теперь возвращается в JSON ответе, не в cookie
 }
 
 // setRefreshCookie устанавливает refresh-токен в HttpOnly cookie с более длительным TTL.
@@ -251,16 +242,18 @@ func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		refreshTTL = 30 * 24 * time.Hour
 	}
 
-	// JTI
+	// JTI и CSRF токен
 	accessJTI := utils.GenerateSecureRandomString(16)
 	refreshJTI := utils.GenerateSecureRandomString(24)
+	csrfToken := utils.GenerateSecureRandomString(32)
 
-	// Формируем access claims
+	// Формируем access claims (включаем CSRF для проверки)
 	accessClaims := jwt.MapClaims{
 		"id":    user.ID,
 		"login": user.Login,
 		"role":  user.Role,
 		"jti":   accessJTI,
+		"csrf":  csrfToken, // CSRF токен для Custom Header защиты
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(expiration).Unix(),
 	}
@@ -298,13 +291,14 @@ func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	// Возвращаем данные пользователя в ответе
 	user.PasswordHash = ""
 	RespondWithJSON(w, http.StatusOK, LoginResponse{
-		Message: "Login successful",
-		User:    user,
+		Message:   "Login successful",
+		User:      user,
+		CsrfToken: csrfToken, // Возвращаем CSRF токен для использования клиентом
 	})
 }
 
 // RefreshToken обновляет JWT токены (access и refresh) с ротацией.
-func RefreshToken(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	logger := slog.With("handler", "RefreshToken", "method", r.Method, "path", r.URL.Path)
 
 	// Берем refresh_token из cookies
@@ -356,6 +350,14 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := int(uidFloat)
 
+	// Получаем данные пользователя из БД для роли и логина
+	user, err := h.UserRepo.GetUserByID(r.Context(), userID)
+	if err != nil {
+		logger.Error("Failed to fetch user for refresh", "user_id", userID, "error", err)
+		http.Error(w, "Failed to fetch user data", http.StatusInternalServerError)
+		return
+	}
+
 	// Время жизни
 	expirationStr := os.Getenv("JWT_EXPIRATION")
 	expiration, err := time.ParseDuration(expirationStr)
@@ -379,12 +381,16 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// Сгенерируем новые токены
 	newAccessJTI := utils.GenerateSecureRandomString(16)
 	newRefreshJTI := utils.GenerateSecureRandomString(24)
+	newCsrfToken := utils.GenerateSecureRandomString(32) // Новый CSRF токен
 
 	accessClaims := jwt.MapClaims{
-		"id":  userID,
-		"jti": newAccessJTI,
-		"iat": time.Now().Unix(),
-		"exp": time.Now().Add(expiration).Unix(),
+		"id":    userID,
+		"login": user.Login,
+		"role":  user.Role,
+		"jti":   newAccessJTI,
+		"csrf":  newCsrfToken, // CSRF токен для защиты
+		"iat":   time.Now().Unix(),
+		"exp":   time.Now().Add(expiration).Unix(),
 	}
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
 	accessString, err := accessToken.SignedString(middleware.GetJWTSecret())
@@ -414,7 +420,8 @@ func RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"message": "Token refreshed",
+		"message":    "Token refreshed",
+		"csrf_token": newCsrfToken, // Возвращаем новый CSRF токен
 	})
 }
 

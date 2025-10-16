@@ -29,7 +29,6 @@ export async function getAllRequests(
   if (sortOrder) params.append('sortOrder', sortOrder);
 
   const endpoint = `/api/manager/requests?${params.toString()}`;
-  console.log(`Fetching all requests from (manager): ${endpoint}`);
 
   try {
     return await apiFetch<PaginatedResponse<Request>>(endpoint);

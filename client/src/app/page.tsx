@@ -19,11 +19,9 @@ export default function HomePage() {
     // Если пользователь аутентифицирован, перенаправляем на соответствующую домашнюю страницу
     if (isAuthenticated) {
       const homepage = getHomepageForRole(userRole);
-      console.log(`Root page: redirecting authenticated user to ${homepage}`);
       router.replace(homepage);
     } else {
       // Если пользователь не аутентифицирован, перенаправляем на страницу входа
-      console.log('Root page: redirecting unauthenticated user to login');
       router.replace('/login');
     }
   }, [isAuthenticated, userRole, loading, router]);

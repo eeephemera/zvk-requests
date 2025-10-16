@@ -22,6 +22,7 @@ const (
 	RoleKey        contextKey = "role"
 	TokenIDKey     contextKey = "tokenID"     // Новый ключ для JWT ID
 	TokenIssuedKey contextKey = "tokenIssued" // Новый ключ для времени создания токена
+	CSRFKey        contextKey = "csrf"        // Ключ для CSRF токена из JWT
 )
 
 // Глобальная переменная для хранения секрета
@@ -213,6 +214,10 @@ func ValidateToken(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, TokenIDKey, jti)
 		if iat, ok := claims["iat"].(float64); ok {
 			ctx = context.WithValue(ctx, TokenIssuedKey, time.Unix(int64(iat), 0))
+		}
+		// Извлекаем CSRF токен для проверки в CSRFProtection middleware
+		if csrfToken, ok := claims["csrf"].(string); ok && csrfToken != "" {
+			ctx = context.WithValue(ctx, CSRFKey, csrfToken)
 		}
 
 		// Логируем успешную аутентификацию

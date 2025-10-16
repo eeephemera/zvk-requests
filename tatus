@@ -1,0 +1,52 @@
+[1mdiff --git a/server/main.go b/server/main.go[m
+[1mindex 73b04a2..7cc866e 100644[m
+[1m--- a/server/main.go[m
+[1m+++ b/server/main.go[m
+[36m@@ -8,6 +8,7 @@[m [mimport ([m
+ 	"os"[m
+ 	"os/signal"[m
+ 	"strconv"[m
+[32m+[m	[32m"strings"[m
+ 	"time"[m
+ [m
+ 	"github.com/eeephemera/zvk-requests/server/db"[m
+[36m@@ -109,9 +110,16 @@[m [mfunc main() {[m
+ 	}[m
+ 	rateLimiter := middleware.NewRateLimiterWithBlock(window, maxReq, 15*time.Minute)[m
+ [m
+[31m-	// Базовый rate limiter для всех запросов[m
+[32m+[m	[32m// Базовый rate limiter для всех запросов, но исключаем чувствительный поиск по ИНН,[m
+[32m+[m	[32m// для которого действует отдельный лимитер ниже.[m
+ 	r.Use(func(next http.Handler) http.Handler {[m
+[31m-		return rateLimiter.LimitByIP(next)[m
+[32m+[m		[32mreturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {[m
+[32m+[m			[32mif strings.HasPrefix(r.URL.Path, "/api/end-clients/search") {[m
+[32m+[m				[32mnext.ServeHTTP(w, r)[m
+[32m+[m				[32mreturn[m
+[32m+[m			[32m}[m
+[32m+[m			[32mrateLimiter.LimitByIP(next).ServeHTTP(w, r)[m
+[32m+[m		[32m})[m
+ 	})[m
+ [m
+ 	// Специальный rate limiter для авторизации (более строгий: по умолчанию 20/мин)[m
+[36m@@ -165,10 +173,6 @@[m [mfunc main() {[m
+ 	loginRouter.Use(loginLimiter.LimitByPath([]string{"/api/login"}, loginMax))[m
+ 	loginRouter.HandleFunc("", authHandler.LoginUser).Methods("POST")[m
+ [m
+[31m-	// Отдельный лимит для чувствительных GET, например /api/end-clients/search[m
+[31m-	sensitiveGetLimiter := middleware.NewRateLimiterWithBlock(1*time.Minute, 120, 10*time.Minute)[m
+[31m-	r.PathPrefix("/api/end-clients/search").Handler(sensitiveGetLimiter.LimitByIP(http.HandlerFunc(endClientHandler.SearchByINNHandler))).Methods("GET", "OPTIONS")[m
+[31m-[m
+ 	r.HandleFunc("/api/logout", handlers.LogoutUser).Methods("POST")[m
+ [m
+ 	// Защищенные маршруты[m
+[36m@@ -187,8 +191,7 @@[m [mfunc main() {[m
+ 	// --- Маршруты для партнеров (USER) ---[m
+ 	userRouter := authRouter.PathPrefix("/requests").Subrouter()[m
+ 	userRouter.Use(middleware.RequireRole(string(models.RoleUser)))[m
+[31m-	// Валидация для создания заявки (middleware)[m
+[31m-	userRouter.Use(middleware.ValidateRequest(middleware.ValidateCreateRequest))[m
+[32m+[m	[32m// Валидация для создания заявки выполняется внутри обработчика[m
+ 	userRouter.HandleFunc("", requestHandler.CreateRequestHandlerNew).Methods("POST")[m
+ 	userRouter.HandleFunc("/my", requestHandler.ListMyRequestsHandler).Methods("GET")[m
+ 	userRouter.HandleFunc("/my/{id:[0-9]+}", requestHandler.GetMyRequestDetailsHandler).Methods("GET")[m

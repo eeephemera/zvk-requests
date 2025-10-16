@@ -79,18 +79,27 @@ func CSRFProtection(next http.Handler) http.Handler {
 			return
 		}
 
-		// Double-submit token: сравниваем заголовок и cookie
+		// Custom Header CSRF Protection:
+		// 1. Проверяем наличие заголовка X-CSRF-Token
 		headerToken := r.Header.Get("X-CSRF-Token")
 		if headerToken == "" {
-			http.Error(w, "Missing CSRF token", http.StatusForbidden)
+			http.Error(w, "Missing CSRF token in header", http.StatusForbidden)
 			return
 		}
-		cookie, err := r.Cookie("csrf_token")
-		if err != nil || cookie.Value == "" {
-			http.Error(w, "Missing CSRF cookie", http.StatusForbidden)
+
+		// 2. Извлекаем CSRF токен из JWT claims (уже проверенного middleware.ValidateToken)
+		// Импортируем ключ из middleware для консистентности
+		type contextKey string
+		const CSRFKey contextKey = "csrf"
+
+		csrfFromJWT, ok := r.Context().Value(CSRFKey).(string)
+		if !ok || csrfFromJWT == "" {
+			http.Error(w, "CSRF token not found in session", http.StatusForbidden)
 			return
 		}
-		if cookie.Value != headerToken {
+
+		// 3. Сравниваем токены
+		if headerToken != csrfFromJWT {
 			http.Error(w, "CSRF token mismatch", http.StatusForbidden)
 			return
 		}
