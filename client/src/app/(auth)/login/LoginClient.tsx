@@ -105,13 +105,20 @@ export default function LoginClient() {
 
       // Получаем данные пользователя напрямую из ответа
       const responseData: LoginApiResponse = await res.json();
+      console.log('[LoginClient] Login response:', { 
+        user: responseData.user?.login, 
+        csrf_token: responseData.csrf_token ? `${responseData.csrf_token.substring(0, 10)}...` : 'MISSING' 
+      });
       
       // Обновляем состояние авторизации в контексте
       updateAuthState(responseData.user);
       
       // Сохраняем CSRF токен для защиты от CSRF атак
       if (responseData.csrf_token) {
+        console.log('[LoginClient] Saving CSRF token...');
         setCsrfToken(responseData.csrf_token);
+      } else {
+        console.error('[LoginClient] NO CSRF TOKEN IN LOGIN RESPONSE!');
       }
       
       // Получаем путь для редиректа из URL

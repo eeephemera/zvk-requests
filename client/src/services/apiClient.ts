@@ -109,8 +109,12 @@ export async function apiFetch<T>(
   const method = (options.method || 'GET').toString().toUpperCase();
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
     const csrf = getCSRFToken();
+    console.log(`[apiClient] Method: ${method}, CSRF token:`, csrf ? `${csrf.substring(0, 10)}...` : 'null');
     if (csrf && !headers.has('X-CSRF-Token')) {
       headers.set('X-CSRF-Token', csrf);
+      console.log('[apiClient] X-CSRF-Token header added');
+    } else if (!csrf) {
+      console.warn('[apiClient] No CSRF token available!');
     }
   }
 
@@ -183,8 +187,12 @@ export class ApiClient {
     const method = (options.method || 'GET').toString().toUpperCase();
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
       const csrf = getCSRFToken();
+      console.log(`[ApiClient.request] Method: ${method}, CSRF token:`, csrf ? `${csrf.substring(0, 10)}...` : 'null');
       if (csrf && !headers.has('X-CSRF-Token')) {
         headers.set('X-CSRF-Token', csrf);
+        console.log('[ApiClient.request] X-CSRF-Token header added');
+      } else if (!csrf) {
+        console.warn('[ApiClient.request] No CSRF token available!');
       }
     }
     
@@ -252,8 +260,12 @@ export class ApiClient {
 
         // Attach CSRF token for Custom Header protection
         const csrf = getCSRFToken();
+        console.log(`[XHR] CSRF token for multipart:`, csrf ? `${csrf.substring(0, 10)}...` : 'null');
         if (csrf) {
           xhr.setRequestHeader('X-CSRF-Token', csrf);
+          console.log('[XHR] X-CSRF-Token header set on XHR request');
+        } else {
+          console.warn('[XHR] No CSRF token available for multipart request!');
         }
         
         // Отслеживаем прогресс
