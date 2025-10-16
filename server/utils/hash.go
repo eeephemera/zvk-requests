@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"unicode"
 
-	"github.com/eeephemera/zvk-requests/server/middleware"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -80,28 +79,19 @@ func CSRFProtection(next http.Handler) http.Handler {
 			return
 		}
 
-		// Custom Header CSRF Protection:
-		// 1. Проверяем наличие заголовка X-CSRF-Token
+		// Session-based CSRF Protection:
+		// Проверяем наличие кастомного заголовка X-CSRF-Token
+		// Браузер НЕ позволит стороннему сайту добавить этот заголовок в кросс-доменном запросе
+		// Достаточно проверить что заголовок присутствует и не пустой
 		headerToken := r.Header.Get("X-CSRF-Token")
 		if headerToken == "" {
 			http.Error(w, "Missing CSRF token in header", http.StatusForbidden)
 			return
 		}
 
-		// 2. Извлекаем CSRF токен из JWT claims (уже проверенного middleware.ValidateToken)
-		// Используем ключ из middleware package для консистентности
-		csrfFromJWT, ok := r.Context().Value(middleware.CSRFKey).(string)
-		if !ok || csrfFromJWT == "" {
-			http.Error(w, "CSRF token not found in session", http.StatusForbidden)
-			return
-		}
-
-		// 3. Сравниваем токены
-		if headerToken != csrfFromJWT {
-			http.Error(w, "CSRF token mismatch", http.StatusForbidden)
-			return
-		}
-
+		// Значение токена не важно - важно что SPA добавила заголовок
+		// Это защищает от CSRF атак, так как злоумышленник не может заставить браузер
+		// добавить кастомный заголовок в запрос с другого домена
 		next.ServeHTTP(w, r)
 	})
 }

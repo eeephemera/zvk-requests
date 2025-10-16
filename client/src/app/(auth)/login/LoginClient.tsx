@@ -24,7 +24,6 @@ type FormInputs = {
 type LoginApiResponse = {
   message: string;
   user: AuthResponse; // Используем тип из AuthContext
-  csrf_token: string; // CSRF токен для защиты
 };
 
 const getFriendlyErrorMessage = (error: string, status?: number): string => {
@@ -43,8 +42,8 @@ export default function LoginClient() {
   const [skipRedirect, setSkipRedirect] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Получаем функцию updateAuthState и setCsrfToken из контекста
-  const { isAuthenticated, updateAuthState, setCsrfToken } = useAuth(); 
+  // Получаем функцию updateAuthState из контекста
+  const { isAuthenticated, updateAuthState } = useAuth(); 
   
   // Проверка и инкремент счетчика попыток редиректа
   const shouldSkipRedirect = (): boolean => {
@@ -105,21 +104,10 @@ export default function LoginClient() {
 
       // Получаем данные пользователя напрямую из ответа
       const responseData: LoginApiResponse = await res.json();
-      console.log('[LoginClient] Login response:', { 
-        user: responseData.user?.login, 
-        csrf_token: responseData.csrf_token ? `${responseData.csrf_token.substring(0, 10)}...` : 'MISSING' 
-      });
       
       // Обновляем состояние авторизации в контексте
       updateAuthState(responseData.user);
-      
-      // Сохраняем CSRF токен для защиты от CSRF атак
-      if (responseData.csrf_token) {
-        console.log('[LoginClient] Saving CSRF token...');
-        setCsrfToken(responseData.csrf_token);
-      } else {
-        console.error('[LoginClient] NO CSRF TOKEN IN LOGIN RESPONSE!');
-      }
+      // CSRF токен генерируется автоматически при первом запросе (session-based)
       
       // Получаем путь для редиректа из URL
       const fromPath = searchParams.get('from');
@@ -127,8 +115,16 @@ export default function LoginClient() {
       // Используем отдельную функцию для определения домашней страницы на основе роли
       const defaultPath = getHomepageForRole(responseData.user.role);
       
-      // Определяем конечный путь редиректа
-      let returnTo = fromPath || defaultPath;
+      // Определяем конечный путь редиректа с валидацией (защита от Open Redirect)
+      let returnTo = defaultPath;
+      
+      if (fromPath) {
+        // Валидация: разрешаем только относительные пути (начинаются с /)
+        // Блокируем абсолютные URL и протоколы (http://, https://, javascript:, etc)
+        if (fromPath.startsWith('/') && !fromPath.startsWith('//')) {
+          returnTo = fromPath;
+        }
+      }
       
       // Корректируем неверные пути
       if (returnTo === "/requests") {

@@ -31,9 +31,8 @@ type LoginRequest struct {
 
 // Определяем структуру ответа для LoginUser, которая включает данные пользователя
 type LoginResponse struct {
-	Message   string       `json:"message"`
-	User      *models.User `json:"user"`
-	CsrfToken string       `json:"csrf_token"` // CSRF токен для Custom Header защиты
+	Message string       `json:"message"`
+	User    *models.User `json:"user"`
 }
 
 // setTokenCookie устанавливает JWT-токен в HttpOnly cookie.
@@ -242,18 +241,16 @@ func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 		refreshTTL = 30 * 24 * time.Hour
 	}
 
-	// JTI и CSRF токен
+	// JTI для токенов
 	accessJTI := utils.GenerateSecureRandomString(16)
 	refreshJTI := utils.GenerateSecureRandomString(24)
-	csrfToken := utils.GenerateSecureRandomString(32)
 
-	// Формируем access claims (включаем CSRF для проверки)
+	// Формируем access claims
 	accessClaims := jwt.MapClaims{
 		"id":    user.ID,
 		"login": user.Login,
 		"role":  user.Role,
 		"jti":   accessJTI,
-		"csrf":  csrfToken, // CSRF токен для Custom Header защиты
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(expiration).Unix(),
 	}
@@ -291,9 +288,9 @@ func (h *AuthHandler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	// Возвращаем данные пользователя в ответе
 	user.PasswordHash = ""
 	RespondWithJSON(w, http.StatusOK, LoginResponse{
-		Message:   "Login successful",
-		User:      user,
-		CsrfToken: csrfToken, // Возвращаем CSRF токен для использования клиентом
+		Message: "Login successful",
+		User:    user,
+		// CSRF токен больше не нужен - клиент генерирует свой session-based токен
 	})
 }
 
@@ -381,14 +378,12 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// Сгенерируем новые токены
 	newAccessJTI := utils.GenerateSecureRandomString(16)
 	newRefreshJTI := utils.GenerateSecureRandomString(24)
-	newCsrfToken := utils.GenerateSecureRandomString(32) // Новый CSRF токен
 
 	accessClaims := jwt.MapClaims{
 		"id":    userID,
 		"login": user.Login,
 		"role":  user.Role,
 		"jti":   newAccessJTI,
-		"csrf":  newCsrfToken, // CSRF токен для защиты
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(expiration).Unix(),
 	}
@@ -420,8 +415,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"message":    "Token refreshed",
-		"csrf_token": newCsrfToken, // Возвращаем новый CSRF токен
+		"message": "Token refreshed",
 	})
 }
 

@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from "react";
 import { apiFetch, ApiError } from "../services/apiClient";
-import * as csrfStore from "../lib/csrfStore";
+import { clearCsrfToken } from "../lib/csrfStore";
 
 // ---- Config (from environment) ----
 const ENV_TTL = Number(process.env.NEXT_PUBLIC_AUTH_CACHE_TTL_MS || "0");
@@ -79,8 +79,6 @@ type AuthContextType = {
   userRole: string | null;
   userId: number | null;
   loading: boolean;
-  csrfToken: string | null; // CSRF токен для защиты от CSRF атак
-  setCsrfToken: (token: string | null) => void;
   logout: () => Promise<void>;
   checkAuth: (forceCheck?: boolean) => Promise<void>;
   updateAuthState: (userData: AuthResponse) => void;
@@ -91,8 +89,6 @@ const initialState: AuthContextType = {
   userRole: null,
   userId: null,
   loading: true,
-  csrfToken: null,
-  setCsrfToken: () => { console.warn("setCsrfToken function called before AuthProvider initialized"); },
   logout: async () => { console.warn("Logout function called before AuthProvider initialized"); },
   checkAuth: async () => { console.warn("checkAuth function called before AuthProvider initialized"); },
   updateAuthState: () => { console.warn("updateAuthState function called before AuthProvider initialized"); },
@@ -114,13 +110,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userId, setUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [csrfToken, setCsrfTokenState] = useState<string | null>(null);
-  
-  // Обертка для setCsrfToken которая синхронизирует с csrfStore
-  const setCsrfToken = useCallback((token: string | null) => {
-    setCsrfTokenState(token);
-    csrfStore.setCsrfToken(token);
-  }, []);
 
   // Троттлинг / бэкофф
   const isCheckingAuth = useRef(false);
@@ -133,7 +122,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setIsAuthenticated(false);
     setUserRole(null);
     setUserId(null);
-    setCsrfToken(null);
+    clearCsrfToken(); // Очищаем session-based CSRF токен
     if (typeof document !== 'undefined') {
       document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
     }
@@ -143,7 +132,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setIsAuthenticated(false);
     setUserRole(null);
     setUserId(null);
-    setCsrfToken(null);
+    clearCsrfToken(); // Очищаем session-based CSRF токен
   }, []);
 
   const updateAuthState = useCallback((userData: AuthResponse) => {
@@ -313,8 +302,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         userRole,
         userId,
         loading,
-        csrfToken,
-        setCsrfToken,
         logout,
         checkAuth,
         updateAuthState,

@@ -173,8 +173,6 @@ func main() {
 	loginRouter.Use(loginLimiter.LimitByPath([]string{"/api/login"}, loginMax))
 	loginRouter.HandleFunc("", authHandler.LoginUser).Methods("POST")
 
-	r.HandleFunc("/api/logout", handlers.LogoutUser).Methods("POST")
-
 	// Защищенные маршруты
 	authRouter := r.PathPrefix("/api").Subrouter()
 	authRouter.Use(middleware.ValidateToken)
@@ -182,6 +180,7 @@ func main() {
 	authRouter.Use(utils.CSRFProtection)
 
 	authRouter.HandleFunc("/me", authHandler.Me).Methods("GET", "OPTIONS")
+	authRouter.HandleFunc("/logout", handlers.LogoutUser).Methods("POST", "OPTIONS")
 	authRouter.HandleFunc("/refresh", authHandler.RefreshToken).Methods("POST", "OPTIONS")
 
 	// --- Новые маршруты для справочников ---
