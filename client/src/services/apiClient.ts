@@ -1,3 +1,5 @@
+import { getCsrfToken } from '../lib/csrfStore';
+
 export class ApiError extends Error {
   status: number;
   data?: unknown;
@@ -50,8 +52,6 @@ function handleApiError(error: unknown): never {
 }
 
 // CSRF helper: read CSRF token from memory store (Custom Header protection)
-import { getCsrfToken } from '../lib/csrfStore';
-
 function getCSRFToken(): string | null {
   return getCsrfToken();
 }
