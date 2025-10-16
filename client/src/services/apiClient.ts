@@ -49,6 +49,13 @@ function handleApiError(error: unknown): never {
   throw new ApiError('An unknown error occurred', 500);
 }
 
+// CSRF helper: read csrf_token cookie value (for double-submit protection)
+function getCSRFCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(/(?:^|; )csrf_token=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 // Helper function to fetch a blob with filename from content-disposition
 export async function fetchBlobWithFilename(endpoint: string): Promise<BlobResponse> {
   const token = localStorage.getItem('token');
@@ -96,6 +103,15 @@ export async function apiFetch<T>(
   
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
+  }
+
+  // Attach CSRF token for non-idempotent requests
+  const method = (options.method || 'GET').toString().toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    const csrf = getCSRFCookie();
+    if (csrf && !headers.has('X-CSRF-Token')) {
+      headers.set('X-CSRF-Token', csrf);
+    }
   }
 
   const config: RequestInit = {
@@ -162,6 +178,15 @@ export class ApiClient {
     if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
+
+    // Attach CSRF token for non-idempotent requests
+    const method = (options.method || 'GET').toString().toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+      const csrf = getCSRFCookie();
+      if (csrf && !headers.has('X-CSRF-Token')) {
+        headers.set('X-CSRF-Token', csrf);
+      }
+    }
     
     try {
       const response = await fetch(this.baseUrl + endpoint, {
@@ -224,6 +249,12 @@ export class ApiClient {
         headers.forEach((value, key) => {
           xhr.setRequestHeader(key, value);
         });
+
+        // Attach CSRF token for double-submit
+        const csrf = getCSRFCookie();
+        if (csrf) {
+          xhr.setRequestHeader('X-CSRF-Token', csrf);
+        }
         
         // Отслеживаем прогресс
         xhr.upload.onprogress = (event) => {

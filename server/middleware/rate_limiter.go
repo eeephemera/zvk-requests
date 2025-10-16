@@ -23,7 +23,7 @@ type RateLimiter struct {
 // NewRateLimiter создает новый экземпляр ограничителя запросов.
 // windowSize - временное окно для подсчета запросов (например, 1 минута).
 // maxRequests - максимальное количество запросов в окне.
-// blockDuration - длительность блокировки IP при превышении лимита (по умолчанию 5 минут).
+// blockDuration - длительность блокировки IP при превышении лимита (по умолчанию 10 минут).
 func NewRateLimiter(windowSize time.Duration, maxRequests int) *RateLimiter {
 	return &RateLimiter{
 		ipRequests:    make(map[string][]time.Time),

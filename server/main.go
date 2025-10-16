@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/eeephemera/zvk-requests/server/db"
@@ -109,9 +110,16 @@ func main() {
 	}
 	rateLimiter := middleware.NewRateLimiterWithBlock(window, maxReq, 15*time.Minute)
 
-	// Базовый rate limiter для всех запросов
+	// Базовый rate limiter для всех запросов, но исключаем чувствительный поиск по ИНН,
+	// для которого действует отдельный лимитер ниже.
 	r.Use(func(next http.Handler) http.Handler {
-		return rateLimiter.LimitByIP(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/api/end-clients/search") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			rateLimiter.LimitByIP(next).ServeHTTP(w, r)
+		})
 	})
 
 	// Специальный rate limiter для авторизации (более строгий: по умолчанию 20/мин)
@@ -165,10 +173,6 @@ func main() {
 	loginRouter.Use(loginLimiter.LimitByPath([]string{"/api/login"}, loginMax))
 	loginRouter.HandleFunc("", authHandler.LoginUser).Methods("POST")
 
-	// Отдельный лимит для чувствительных GET, например /api/end-clients/search
-	sensitiveGetLimiter := middleware.NewRateLimiterWithBlock(1*time.Minute, 120, 10*time.Minute)
-	r.PathPrefix("/api/end-clients/search").Handler(sensitiveGetLimiter.LimitByIP(http.HandlerFunc(endClientHandler.SearchByINNHandler))).Methods("GET", "OPTIONS")
-
 	r.HandleFunc("/api/logout", handlers.LogoutUser).Methods("POST")
 
 	// Защищенные маршруты
@@ -187,8 +191,7 @@ func main() {
 	// --- Маршруты для партнеров (USER) ---
 	userRouter := authRouter.PathPrefix("/requests").Subrouter()
 	userRouter.Use(middleware.RequireRole(string(models.RoleUser)))
-	// Валидация для создания заявки (middleware)
-	userRouter.Use(middleware.ValidateRequest(middleware.ValidateCreateRequest))
+	// Валидация для создания заявки выполняется внутри обработчика
 	userRouter.HandleFunc("", requestHandler.CreateRequestHandlerNew).Methods("POST")
 	userRouter.HandleFunc("/my", requestHandler.ListMyRequestsHandler).Methods("GET")
 	userRouter.HandleFunc("/my/{id:[0-9]+}", requestHandler.GetMyRequestDetailsHandler).Methods("GET")

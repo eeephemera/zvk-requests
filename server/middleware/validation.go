@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-
-	"github.com/eeephemera/zvk-requests/server/validation"
 )
 
 // ValidationError описывает ошибку валидации для одного поля
@@ -59,45 +57,41 @@ func ValidateRequest(validationFunc func(r *http.Request) []ValidationError) fun
 func ValidateCreateRequest(r *http.Request) []ValidationError {
 	var errors []ValidationError
 
-	// В зависимости от Content-Type извлекаем данные
+	// Проверяем тип содержимого
 	contentType := r.Header.Get("Content-Type")
 
 	if strings.Contains(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
+		// Поддерживаем новую контрактную схему: FormData с полем 'request_data' (JSON)
+		if err := r.ParseMultipartForm(20 << 20); err != nil {
 			errors = append(errors, ValidationError{Field: "_form", Message: "Некорректный формат формы"})
 			return errors
 		}
 
-		// Валидация полей формы
-		if err := validation.ValidateINN(r.FormValue("inn")); err != nil {
-			errors = append(errors, ValidationError{Field: "inn", Message: err.Error()})
+		requestDataJSON := r.FormValue("request_data")
+		if requestDataJSON == "" {
+			errors = append(errors, ValidationError{Field: "request_data", Message: "Поле request_data обязательно"})
+			return errors
 		}
 
-		if err := validation.ValidateOrgName(r.FormValue("organization_name")); err != nil {
-			errors = append(errors, ValidationError{Field: "organization_name", Message: err.Error()})
+		// Проверяем, что request_data — корректный JSON
+		var tmp map[string]any
+		if err := json.Unmarshal([]byte(requestDataJSON), &tmp); err != nil {
+			errors = append(errors, ValidationError{Field: "_json", Message: "Некорректный JSON в request_data"})
+			return errors
 		}
 
-		if err := validation.ValidateImplementationDate(r.FormValue("implementation_date")); err != nil {
-			errors = append(errors, ValidationError{Field: "implementation_date", Message: err.Error()})
-		}
-
-		if err := validation.ValidateFZType(r.FormValue("fz_type")); err != nil {
-			errors = append(errors, ValidationError{Field: "fz_type", Message: err.Error()})
-		}
-
-		if err := validation.ValidateRegistryType(r.FormValue("registry_type")); err != nil {
-			errors = append(errors, ValidationError{Field: "registry_type", Message: err.Error()})
-		}
-
-		// Проверка наличия файла
-		_, fileHeader, err := r.FormFile("tz_file")
-		if err != nil {
-			errors = append(errors, ValidationError{Field: "tz_file", Message: "Файл ТЗ обязателен"})
-		} else if fileHeader.Size > 10*1024*1024 {
-			errors = append(errors, ValidationError{Field: "tz_file", Message: "Размер файла не должен превышать 10МБ"})
+		// Файлы опциональны, но ограничим размер каждого до 15МБ
+		if r.MultipartForm != nil {
+			for field, fhs := range r.MultipartForm.File {
+				for _, fh := range fhs {
+					if fh.Size > 15*1024*1024 {
+						errors = append(errors, ValidationError{Field: field, Message: "Размер файла не должен превышать 15МБ"})
+					}
+				}
+			}
 		}
 	} else if strings.Contains(contentType, "application/json") {
-		// Для JSON запросов
+		// Мягкая проверка JSON: просто валидируем, что тело — корректный JSON
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			errors = append(errors, ValidationError{Field: "_body", Message: "Не удалось прочитать тело запроса"})
@@ -105,39 +99,13 @@ func ValidateCreateRequest(r *http.Request) []ValidationError {
 		}
 		r.Body = io.NopCloser(strings.NewReader(string(body)))
 
-		var requestData struct {
-			Inn                string `json:"inn"`
-			OrganizationName   string `json:"organization_name"`
-			ImplementationDate string `json:"implementation_date"`
-			FZType             string `json:"fz_type"`
-			RegistryType       string `json:"registry_type"`
-		}
-
-		if err := json.Unmarshal(body, &requestData); err != nil {
+		var tmp map[string]any
+		if err := json.Unmarshal(body, &tmp); err != nil {
 			errors = append(errors, ValidationError{Field: "_json", Message: "Некорректный JSON формат"})
 			return errors
 		}
-
-		// Валидация полей
-		if err := validation.ValidateINN(requestData.Inn); err != nil {
-			errors = append(errors, ValidationError{Field: "inn", Message: err.Error()})
-		}
-
-		if err := validation.ValidateOrgName(requestData.OrganizationName); err != nil {
-			errors = append(errors, ValidationError{Field: "organization_name", Message: err.Error()})
-		}
-
-		if err := validation.ValidateImplementationDate(requestData.ImplementationDate); err != nil {
-			errors = append(errors, ValidationError{Field: "implementation_date", Message: err.Error()})
-		}
-
-		if err := validation.ValidateFZType(requestData.FZType); err != nil {
-			errors = append(errors, ValidationError{Field: "fz_type", Message: err.Error()})
-		}
-
-		if err := validation.ValidateRegistryType(requestData.RegistryType); err != nil {
-			errors = append(errors, ValidationError{Field: "registry_type", Message: err.Error()})
-		}
+	} else if strings.Contains(contentType, "application/x-www-form-urlencoded") {
+		// Поддерживаем на всякий случай; строгих проверок нет
 	} else {
 		errors = append(errors, ValidationError{Field: "_content_type", Message: "Неподдерживаемый Content-Type"})
 	}
