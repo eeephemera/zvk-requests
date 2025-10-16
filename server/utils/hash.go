@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"unicode"
 
+	"github.com/eeephemera/zvk-requests/server/middleware"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -88,11 +89,8 @@ func CSRFProtection(next http.Handler) http.Handler {
 		}
 
 		// 2. Извлекаем CSRF токен из JWT claims (уже проверенного middleware.ValidateToken)
-		// Импортируем ключ из middleware для консистентности
-		type contextKey string
-		const CSRFKey contextKey = "csrf"
-
-		csrfFromJWT, ok := r.Context().Value(CSRFKey).(string)
+		// Используем ключ из middleware package для консистентности
+		csrfFromJWT, ok := r.Context().Value(middleware.CSRFKey).(string)
 		if !ok || csrfFromJWT == "" {
 			http.Error(w, "CSRF token not found in session", http.StatusForbidden)
 			return
